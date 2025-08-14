@@ -3,17 +3,20 @@
 #include "knox.h"
 #include "common.h"
 
-Commahd_Handler c_handlers[] = {
-	{ (char *)"new", new_handle},
-	{ (char *)"key", key_handle},
-	{ (char *)"addresses", addresses_handle},
-	{ (char *)"keys", keys_handle},
-	{ (char *)"recover", recover_handle},
-	{ (char *)"receive", receive_handle},
-	{ (char *)"balance", balance_handle},
-	{ (char *)"help", help_handle},
-	{ (char *)"menu", menu_handle},
-};
+void zero(void *buf, size_t size) {
+	memset(buf, 0, size);
+	return;
+}
+
+void zero_multiple(void *buf, ...) {
+	va_list args;
+	va_start(args, buf);
+	void *ptr;
+	while ((ptr = va_arg(args, void *)) != NULL) {
+		zero(ptr, sizeof(*ptr));
+	}
+	va_end(args);
+}
 
 void print_logo() {
 	FILE *logo = fopen("logo.txt", "r");
@@ -24,6 +27,7 @@ void print_logo() {
 		usleep(100000);
 	}
 	fclose(logo);
+	return;
 }
 
 void print_commands() {
@@ -36,13 +40,65 @@ void print_commands() {
 	"- receive			Receive bitcoin with a new bitcoin address\n"
 	"- balance			Display balance for all addresses in wallet\n"
 	"- help				Safety practices, tips, and educational contents\n"
-	"- menu				Show all commands\n");
+	"- menu				Show all commands\n"
+	"- exit				Exit program\n");
+	return;
+}
+
+Command_Handler c_handlers[] = {
+	{ (char *)"new", new_handle},
+	{ (char *)"help", help_handle},
+	{ (char *)"menu", menu_handle},
+	{ (char *)"exit", exit_handle}
+};
+
+int32 new_handle() {
+	return 0;
+}
+
+int32 help_handle() {
+	return 0;
+}
+
+int32 menu_handle() {
+	print_commands();
+	return 0;
+}
+
+int32 exit_handle() {
+	return 0;
+}
+
+Callback get_command(const char *cmd) {
+	if (!cmd || !cmd[0]) {
+		return NULL;
+	}
+	static const size_t len = sizeof(c_handlers) / sizeof(c_handlers[0]);
+	for (size_t i = 0; i < len; i++) {
+		if (c_handlers[i].command_name && strcmp((char *)cmd, (char *)c_handlers[i].command_name) == 0) {
+			return c_handlers[i].call_back_function;
+		}
+	}
+	return NULL;
 }
 
 void main_loop() {
-	while () {
-
-	}	
+	char buf[256], cmd[256];
+	while (1) {
+		zero_multiple(buf, cmd, NULL);	
+		printf("> ");
+		if (!fgets(cmd, sizeof(cmd), stdin)) {
+			fprintf(stderr, "fgets() failure\n");
+		}
+		cmd[strlen(cmd)] = '\0';
+	//	printf("%s\n", cmd);
+		Callback cb = get_command(cmd);
+		if (!cb) {
+			printf("Invalid command\n");
+			continue;
+		}
+		cb();
+	}
 }
 
 int main() {
