@@ -9,7 +9,7 @@ typedef int32 (*Callback)();
 
 typedef struct {
 	char *command_name;
-	Callback call_back_function;
+	Callback callback_function;
 } Command_Handler;
 
 int32 new_handle();

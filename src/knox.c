@@ -3,6 +3,8 @@
 #include "knox.h"
 #include "common.h"
 
+int keep_running = 1;
+
 void zero(void *buf, size_t size) {
 	memset(buf, 0, size);
 	return;
@@ -66,6 +68,8 @@ int32 menu_handle() {
 }
 
 int32 exit_handle() {
+	printf("Bye now, bitcoiner!\n");
+	keep_running = 0;
 	return 0;
 }
 
@@ -76,7 +80,7 @@ Callback get_command(const char *cmd) {
 	static const size_t len = sizeof(c_handlers) / sizeof(c_handlers[0]);
 	for (size_t i = 0; i < len; i++) {
 		if (c_handlers[i].command_name && strcmp((char *)cmd, (char *)c_handlers[i].command_name) == 0) {
-			return c_handlers[i].call_back_function;
+			return c_handlers[i].callback_function;
 		}
 	}
 	return NULL;
@@ -84,14 +88,14 @@ Callback get_command(const char *cmd) {
 
 void main_loop() {
 	char buf[256], cmd[256];
-	while (1) {
+	while (keep_running) {
+		if (!keep_running) break;
 		zero_multiple(buf, cmd, NULL);	
 		printf("> ");
 		if (!fgets(cmd, sizeof(cmd), stdin)) {
 			fprintf(stderr, "fgets() failure\n");
 		}
-		cmd[strlen(cmd)] = '\0';
-	//	printf("%s\n", cmd);
+		cmd[strlen(cmd) - 1] = '\0';
 		Callback cb = get_command(cmd);
 		if (!cb) {
 			printf("Invalid command\n");
