@@ -109,6 +109,8 @@
 	"world", "worry", "worth", "wrap", "wreck", "wrestle", "wrist", "write", "wrong", "yard", "year", "yellow", "you", "young", "youth", "zebra", "zero", "zone", "zoo"
 
 #define NEED_LIBGCRYPT_VERSION "1.11.2"
+#define PASSP_MAX 22
+
 #define PRIVKEY_LENGTH 32
 #define CHAINCODE_LENGTH 32
 #define PUBKEY_LENGTH 33
@@ -123,16 +125,6 @@ typedef struct {
 	uint8_t key_index;
 } key_pair_t;
 
-typedef struct {
-	char mnemonic[1000];
-	uint8_t seed[64];
-	key_pair_t keys;
-} mnemonic_t;
-
-typedef enum {
-	normal_child,
-	hardened_child
-} hardened_t;
 
 gcry_error_t init_gcrypt();
 

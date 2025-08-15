@@ -62,12 +62,15 @@ int test_vector(const char *name, const char *seed_hex, const char *paths[][2], 
 }
 
 int run_test() {
+	/*
 	if (!gcry_check_version("1.8.0")) {
         	fprintf(stderr, "libgcrypt version too old\n");
         	return 1;
     	}
    	gcry_control(GCRYCTL_DISABLE_SECMEM, 0); // For simplicity
     	gcry_control(GCRYCTL_INITIALIZATION_FINISHED, 0);
+	*/
+
 
     	// Test Vector 1
     	const char *tv1_paths[][2] = {{"m/0H", "0H"}};

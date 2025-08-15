@@ -9,6 +9,13 @@ void hex_to_bytes(const char *hex, uint8_t *bytes, size_t len) {
 	}
 }
 
+/*
+generate_master_key()
+derive_child_key()
+*/
+
+
+
 gcry_error_t init_gcrypt() {
 	gcry_error_t err = GPG_ERR_NO_ERROR;
 	const char *version =  gcry_check_version(NEED_LIBGCRYPT_VERSION);
