@@ -1,7 +1,7 @@
 CC = gcc
-CFLAGS = -Wall -g -O2
-LDFLAGS =
-SOURCES = knox.c
+CFLAGS = -Wall -g -O2 $(shell pkg-config --cflags libgcrypt)
+LDFLAGS = $(shell pkg-config --libs libgcrypt)
+SOURCES = knox.c wallet.c
 OBJECTS = $(SOURCES:.c=.o)
 EXECUTABLE = knox
 

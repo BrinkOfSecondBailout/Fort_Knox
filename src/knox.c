@@ -2,8 +2,7 @@
 
 #include "knox.h"
 #include "common.h"
-
-int keep_running = 1;
+#include "wallet.h"
 
 void zero(void *buf, size_t size) {
 	memset(buf, 0, size);
@@ -55,6 +54,11 @@ Command_Handler c_handlers[] = {
 };
 
 int32 new_handle() {
+	init_gcrypt();
+	fprintf(stdout, "Generating a standard BIP84 Bitcoin wallet... keys derivation scheme below.\n"
+
+
+	);
 	return 0;
 }
 
@@ -69,8 +73,7 @@ int32 menu_handle() {
 
 int32 exit_handle() {
 	printf("Bye now, bitcoiner!\n");
-	keep_running = 0;
-	return 0;
+	exit(0);
 }
 
 Callback get_command(const char *cmd) {
@@ -88,8 +91,7 @@ Callback get_command(const char *cmd) {
 
 void main_loop() {
 	char buf[256], cmd[256];
-	while (keep_running) {
-		if (!keep_running) break;
+	while (1) {
 		zero_multiple(buf, cmd, NULL);	
 		printf("> ");
 		if (!fgets(cmd, sizeof(cmd), stdin)) {
