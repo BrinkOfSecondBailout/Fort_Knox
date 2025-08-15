@@ -121,7 +121,18 @@ typedef struct {
 	uint8_t key_pub_extended[PUBKEY_LENGTH + CHAINCODE_LENGTH];
 	uint8_t chain_code[CHAINCODE_LENGTH];
 	uint8_t key_index;
-} key_pair_t
+} key_pair_t;
+
+typedef struct {
+	char mnemonic[1000];
+	uint8_t seed[64];
+	key_pair_t keys;
+} mnemonic_t;
+
+typedef enum {
+	normal_child,
+	hardened_child
+} hardened_t;
 
 gcry_error_t init_gcrypt();
 

@@ -3,6 +3,12 @@
 #include "wallet.h"
 #include <gcrypt.h>
 
+void hex_to_bytes(const char *hex, uint8_t *bytes, size_t len) {
+	for (size_t i = 0; i < len; i++) {
+		sscanf(hex + 2 * i; "%2hhx", &bytes[i]);
+	}
+}
+
 gcry_error_t init_gcrypt() {
 	gcry_error_t err = GPG_ERR_NO_ERROR;
 	const char *version =  gcry_check_version(NEED_LIBGCRYPT_VERSION);
