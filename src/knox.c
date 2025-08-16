@@ -3,6 +3,7 @@
 #include "knox.h"
 #include "common.h"
 #include "wallet.h"
+#include "crypt.h"
 
 void zero(void *buf, size_t size) {
 	memset(buf, 0, size);
@@ -53,12 +54,33 @@ Command_Handler c_handlers[] = {
 	{ (char *)"exit", exit_handle}
 };
 
+int32 exit_handle() {
+	printf("Bye now, bitcoiner!\n");
+	exit(0);
+}
+
 int32 new_handle() {
 	init_gcrypt();
-	fprintf(stdout, "Generating a standard BIP84 Bitcoin wallet... keys derivation scheme below.\n"
+	fprintf(stdout, "Generating a standard BIP84 Bitcoin wallet... keys derivation scheme below.\n");
+	//key_pair_t key_pair = {0};
+	char cmd[255];
+	while (1) {
+		zero(cmd, sizeof(cmd));
+		printf("Select your recovery seed words count (12, 15, 18, 21, 24)\n"
+			"Note: the higher the number, the larger the entropy AKA more cryptographically secured\n> ");
+		if (!fgets(cmd, sizeof(cmd), stdin)) {
+			fprintf(stderr, "fgets() failure\n");
+		}
+		cmd[strlen(cmd)] = '\0';
+		if (strcmp(cmd, "exit") == 0) exit_handle();
+		int nword = atoi(cmd);
+		if (nword != 12 && nword != 15 && nword != 18 && nword != 21 && nword != 24) {
+			fprintf(stderr, "Please select a valid number - only 12, 15, 18, 21, 24 allowed\n");
+		} else {
+			break;
+		}
+	}
 
-
-	);
 	return 0;
 }
 
@@ -69,11 +91,6 @@ int32 help_handle() {
 int32 menu_handle() {
 	print_commands();
 	return 0;
-}
-
-int32 exit_handle() {
-	printf("Bye now, bitcoiner!\n");
-	exit(0);
 }
 
 Callback get_command(const char *cmd) {

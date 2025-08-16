@@ -3,6 +3,8 @@
 #ifndef MNEMONIC_H
 #define MNEMONIC_H
 
+#include "wallet.h"
+
 typedef struct {
         int word_count;
         int entropy_bytes;
@@ -17,4 +19,6 @@ static const mnemonic_config_t configs[] = {
         {24, 32, 8}
 };
 
+int generate_mnemonic(int, const char *, char *, size_t, key_pair_t *);
+int mnemonic_to_seed(const char *, const char *, key_pair_t *);
 #endif

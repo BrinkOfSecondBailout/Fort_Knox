@@ -2,8 +2,10 @@
 
 #include "mnemonic.h"
 #include "wallet.h"
+#include "bip39_words.h"
+#include "crypt.h"
 
-int generate_mnemonic(int word_count, char *mnemonic, size_t mnemonic_len) {
+int generate_mnemonic(int word_count, const char *passphrase, char *mnemonic, size_t mnemonic_len, key_pair_t *key_pair) {
 	const mnemonic_config_t *config = NULL;
 	for (size_t i = 0; i < sizeof(configs) / sizeof(configs[0]); i++) {
 		if (configs[i].word_count == word_count) {
@@ -27,7 +29,8 @@ int generate_mnemonic(int word_count, char *mnemonic, size_t mnemonic_len) {
 	word_count = total_bits / 11;
 	uint8_t buffer[33]; // Max 32 bytes entropy + 1 byte checksum
 	memcpy(buffer, entropy, config->entropy_bytes);
-	
+	buffer[config->entropy_bytes] = hash[0] >> (8 - config->checksum_bits);	
+
 	// Convert to 11-bit groups and map to words
 	char *ptr = mnemonic;
 	size_t remaining = mnemonic_len;
@@ -47,18 +50,18 @@ int generate_mnemonic(int word_count, char *mnemonic, size_t mnemonic_len) {
 		remaining -= strlen(wordlist[value]) + 1;
 	}
 	// Remove trailing spaces
-	if (ptr > mnemonic) *(ptr - 1) = '\0'
-	return 0
+	if (ptr > mnemonic) *(ptr - 1) = '\0';
+	return mnemonic_to_seed(mnemonic, passphrase, key_pair);
 }
 
-int mnemonic_to_seed(const char *mnemonic, key_pair_t *key_pair) {
+int mnemonic_to_seed(const char *mnemonic, const char *passphrase, key_pair_t *key_pair) {
         // Use PBKDF2 to derive seed (BIP-39)
-        gcry_kdf_hd_t kdf;
-        if (gcry_kdf_open(&kdf, GCRY_KDF_PBKDF2, GCRY_MD_SHA512) != 0) return 1;
-        if (gcry_kdf_setkey(kdf, (const uint8_t *)"mnemonic", strlen("mnemonic")) != 0) return 1;
+        // Prepare salt: "mnemonic" + passphrase (or empty string)
+	char salt[128];
+	snprintf(salt, sizeof(salt), "mnemonic%s", passphrase ? passphrase : "");
         uint8_t seed[64];
-        if (gcry_kdf_compute(kdf, mnemonic, strlen(mnemonic), NULL, 0, seed, 64) != 0) return 1;
-        gcry_kdf_close(kdf);
+	gcry_error_t err = gcry_kdf_derive(mnemonic, strlen(mnemonic), GCRY_KDF_PBKDF2, GCRY_MD_SHA512, salt, strlen(salt), 2048UL, 64, seed);
+	if (err != 0) return 1;
         // Store in key_pair_t
         memcpy(key_pair->key_priv, seed, PRIVKEY_LENGTH);
         memcpy(key_pair->chain_code, seed + PRIVKEY_LENGTH, CHAINCODE_LENGTH);
