@@ -51,6 +51,7 @@ void print_commands() {
 
 Command_Handler c_handlers[] = {
 	{ (char *)"new", new_handle},
+	{ (char *)"balance", balance_handle},
 	{ (char *)"help", help_handle},
 	{ (char *)"menu", menu_handle},
 	{ (char *)"exit", exit_handle}
@@ -62,7 +63,8 @@ int32 exit_handle() {
 }
 
 int32 new_handle() {
-	fprintf(stdout, "Generating a standard BIP84 Bitcoin wallet... keys derivation scheme below.\n");
+	printf("Generating a standard BIP84 Bitcoin wallet...\n"
+		"If this program is running locally, strongly recommended that you disconnect from the internet for extra security\n");
 	key_pair_t key_pair = {0};
 	char mnemonic[256];
 	char passphrase[256];
@@ -139,6 +141,10 @@ int32 new_handle() {
 			"you will see a completely different wallet, not the one you're about to use to send funds to\n"RESET, nword);
 		}	
 	}
+	return 0;
+}
+
+int32 balance_handle() {
 	return 0;
 }
 

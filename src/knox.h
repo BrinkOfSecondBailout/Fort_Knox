@@ -13,6 +13,7 @@ typedef struct {
 } Command_Handler;
 
 int32 new_handle();
+int32 balance_handle();
 int32 help_handle();
 int32 menu_handle();
 int32 exit_handle();
