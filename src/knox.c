@@ -4,6 +4,7 @@
 #include "common.h"
 #include "wallet.h"
 #include "crypt.h"
+#include "mnemonic.h"
 
 void zero(void *buf, size_t size) {
 	memset(buf, 0, size);
@@ -24,10 +25,11 @@ void print_logo() {
 	FILE *logo = fopen("logo.txt", "r");
 	char buffer[1024];
 	while (fgets(buffer, sizeof(buffer), logo)) {
-		printf("%s", buffer);
+		printf(CYAN"%s", buffer);
 		fflush(stdout);
 		usleep(100000);
 	}
+	printf(RESET);
 	fclose(logo);
 	return;
 }
@@ -43,7 +45,7 @@ void print_commands() {
 	"- balance			Display balance for all addresses in wallet\n"
 	"- help				Safety practices, tips, and educational contents\n"
 	"- menu				Show all commands\n"
-	"- exit				Exit program\n");
+	"- exit				Exit program\n\n");
 	return;
 }
 
@@ -60,27 +62,83 @@ int32 exit_handle() {
 }
 
 int32 new_handle() {
-	init_gcrypt();
 	fprintf(stdout, "Generating a standard BIP84 Bitcoin wallet... keys derivation scheme below.\n");
-	//key_pair_t key_pair = {0};
+	key_pair_t key_pair = {0};
+	char mnemonic[256];
+	char passphrase[256];
 	char cmd[255];
+	int nword;
 	while (1) {
 		zero(cmd, sizeof(cmd));
-		printf("Select your recovery seed words count (12, 15, 18, 21, 24)\n"
+		printf("\nSelect your recovery seed words count (12, 15, 18, 21, 24)\n"
 			"Note: the higher the number, the larger the entropy AKA more cryptographically secured\n> ");
 		if (!fgets(cmd, sizeof(cmd), stdin)) {
 			fprintf(stderr, "fgets() failure\n");
 		}
 		cmd[strlen(cmd)] = '\0';
 		if (strcmp(cmd, "exit") == 0) exit_handle();
-		int nword = atoi(cmd);
+		nword = atoi(cmd);
 		if (nword != 12 && nword != 15 && nword != 18 && nword != 21 && nword != 24) {
-			fprintf(stderr, "Please select a valid number - only 12, 15, 18, 21, 24 allowed\n");
+			fprintf(stderr, "\nPlease select a valid number - only 12, 15, 18, 21, 24 allowed\n");
 		} else {
 			break;
 		}
 	}
+	printf("Got it! %d words it is..\n", nword);
+	while (1) {
+		printf("\nWould you like to add an additional passphrase on top of the mnemonic seed words for extra security?\nReply 'yes' or 'no'> ");
+		zero(cmd, sizeof(cmd));
+		zero(passphrase, sizeof(passphrase));
+		if (!fgets(cmd, sizeof(cmd), stdin)) {
+			fprintf(stderr, "fgets() failure\n");
+		}
+		cmd[strlen(cmd) - 1] = '\0';
+		int i = 0;
+		while (cmd[i] != '\0') {
+			cmd[i] = tolower((unsigned char)cmd[i]);
+			i++;
+		}
+		if (strcmp(cmd, "exit") == 0) exit_handle();
+		if ((strcmp(cmd, "yes") != 0) && (strcmp(cmd, "no") != 0)) {
+			fprintf(stderr, "\nInvalid answer, must type 'yes' or 'no'\n");
+		} else if (strcmp(cmd, "yes") == 0) {
+			printf("\nGot it! Let's add a passphrase, a few critical details here:\n"
+				RED"Remember that funds sent to this wallet will always need this passphrase to be recovered!\n"RESET
+				"Think of this passphrase as the %dth word of your mnemonic seed, you MUST have it\n"
+				"Enter your passphrase (*case sensitive*) (up to 256 characters):\n"
+				"> ", nword + 1);
+			if (!fgets(passphrase, sizeof(passphrase), stdin)) {
+				fprintf(stderr, "fgets() failure\n");
+				}
+				passphrase[strlen(passphrase) - 1] = '\0';
+				printf("\nPassphrase successfully included..");
+				break;
+		} else if (strcmp(cmd, "no") == 0) {
+			printf("\nGot it! Your passphrase is left blank\n"
+				"You will only need to write down your seed words once it's generated\n");
+			passphrase[0] = '\0';
+			break;
+		}
+	}			
 
+	if (generate_mnemonic(nword, passphrase, mnemonic, sizeof(mnemonic), &key_pair) == 0) {
+		printf("\nHere is your brand new bitcoin wallet's mnemonic seed words:\n"
+			"\n\n"
+			GREEN"%s\n"RESET
+			"\n\n"
+			RED"IMPORTANT:"RESET 
+			" Please write these words down very carefully on a piece of paper\n"
+			"Do NOT type or save these words on any electronic devices\n"
+			" Losing these words or having them stolen = losing all of your bitcoin\n", mnemonic);
+		if (passphrase[0]) {
+			printf(RED"ALSO IMPORTANT:"RESET 
+			" Those are ONLY the %d mnemonic seed words\n"
+			"but since you added a passphrase, (not listed above), you WILL be responsible\n" 
+			"for having it if you want access to the funds sent to this wallet.\n"
+			RED"If you attempt to recover this wallet with only your seed words and the incorrect or blank passphrase,\n"
+			"you will see a completely different wallet, not the one you're about to use to send funds to\n"RESET, nword);
+		}	
+	}
 	return 0;
 }
 
@@ -126,6 +184,7 @@ void main_loop() {
 
 int main() {
 	print_logo();
+	init_gcrypt();
 	print_commands();
 	main_loop();
 	return 0;

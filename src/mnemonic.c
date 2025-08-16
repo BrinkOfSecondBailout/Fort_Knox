@@ -17,7 +17,6 @@ int generate_mnemonic(int word_count, const char *passphrase, char *mnemonic, si
 		snprintf(mnemonic, mnemonic_len, "Invalid word count, must be 12, 15, 18, 21, or 24");
 		return 1;
 	}
-	init_gcrypt();
 	// Generate entropy
 	uint8_t entropy[32];
 	gcry_randomize(entropy, config->entropy_bytes, GCRY_STRONG_RANDOM);
