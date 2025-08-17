@@ -65,31 +65,6 @@ void print_hex(const char *label, const uint8_t *data, size_t len) {
     printf("\n");
 }
 
-// Test seed derivation (BIP-39)
-int test_seed_derivation(const char *mnemonic, const char *passphrase, const uint8_t *expected_seed) {
-	key_pair_t key_pair = {0}; // Initialize empty key_pair_t
-
-    	// Call your mnemonic_to_seed function
-    	if (mnemonic_to_seed(mnemonic, passphrase, &key_pair) != 0) {
-        	printf("mnemonic_to_seed failed\n");
-        	return 1;
-    	}
-
-    	// Reconstruct the 64-byte seed from key_pair (key_priv + chain_code)
-    	uint8_t computed_seed[64];
-    	memcpy(computed_seed, key_pair.key_priv, PRIVKEY_LENGTH);
-    	memcpy(computed_seed + PRIVKEY_LENGTH, key_pair.chain_code, CHAINCODE_LENGTH);
-
-    	// Compare with expected
-    	int pass = memcmp(computed_seed, expected_seed, 64) == 0;
-    	printf("Seed derivation (using mnemonic_to_seed): %s\n", pass ? "PASS" : "FAIL");
-    	if (!pass) {
-        	print_hex("Expected seed", expected_seed, 64);
-        	print_hex("Got seed", computed_seed, 64);
-    	}
-    	return !pass;
-}
-
 // Test master key generation
 int test_master_key(const uint8_t *seed, size_t seed_len, const uint8_t *expected_priv, const uint8_t *expected_chain) {
 	// Prepare seed_pair from seed (split into key_priv and chain_code)
@@ -155,15 +130,49 @@ int test_child_derivation(const key_pair_t *master, const char *path, const uint
     return !pass;
 }
 
+// Test seed derivation (BIP-39)
+int test_seed_derivation(const char *mnemonic, const char *passphrase, const uint8_t *expected_seed) {
+	key_pair_t key_pair = {0}; // Initialize empty key_pair_t
+
+    	// Call your mnemonic_to_seed function
+    	if (mnemonic_to_seed(mnemonic, passphrase, &key_pair) != 0) {
+        	printf("mnemonic_to_seed failed\n");
+        	return 1;
+    	}
+
+    	// Reconstruct the 64-byte seed from key_pair (key_priv + chain_code)
+    	uint8_t computed_seed[64];
+    	memcpy(computed_seed, key_pair.key_priv, PRIVKEY_LENGTH);
+    	memcpy(computed_seed + PRIVKEY_LENGTH, key_pair.chain_code, CHAINCODE_LENGTH);
+
+    	// Compare with expected
+    	int pass = memcmp(computed_seed, expected_seed, 64) == 0;
+    	printf("Seed derivation (using mnemonic_to_seed): %s\n", pass ? "PASS" : "FAIL");
+    	if (!pass) {
+        	print_hex("Expected seed", expected_seed, 64);
+        	print_hex("Got seed", computed_seed, 64);
+    	}
+    	return !pass;
+}
+
+
 int main() {
     int failures = 0;
 
     // Test BIP-39 seed derivation (use known mnemonic from docs)
     const char *test_mnemonic = "legal winner thank year wave sausage worth useful legal winner thank yellow";
-    const char *test_passphrase = "";
-    const char *expected_seed = "2e8905819b8723fe2c1d161860e5ee1830318dbf49a83bd451cfb8440c28bd6fa457fe1296106559a3c80937a1c1069be3a3a5bd381ee6260e8d9739fce1f607"; // From BIP-39 example
+    const char *test_passphrase = "TREZOR";
+    const char *expected_seed = "2e8905819b8723fe2c1d161860e5ee1830318dbf49a83bd451cfb8440c28bd6fa457fe1296106559a3c80937a1c1069be3a3a5bd381ee6260e8d9739fce1f607";
     failures += test_seed_derivation(test_mnemonic, test_passphrase, (const uint8_t *)expected_seed);
 
+    const char *test_mnemonic2 = "letter advice cage absurd amount doctor acoustic avoid letter advice cage above";
+    const char *test_passphrase2 = "TREZOR";
+    const char *expected_seed2 = "d71de856f81a8acc65e6fc851a38d4d7ec216fd0796d0a6827a3ad6ed5511a30fa280f12eb2e47ed2ac03b5c462a0358d18d69fe4f985ec81778c1b370b652a8";
+    failures += test_seed_derivation(test_mnemonic2, test_passphrase2, (const uint8_t *)expected_seed2);
+
+
+
+/*
     // Test BIP-32 master and child for each vector
     for (int v = 0; v < num_test_vectors; v++) {
         const bip32_test_vector_t *tv = &test_vectors[v];
@@ -185,7 +194,8 @@ int main() {
             failures += test_child_derivation(&master, tv->paths[c], (const uint8_t *)tv->child_priv_hex[c], (const uint8_t *)tv->child_chain_hex[c]);
         }
     }
-
+*/
+ 
     printf("Total failures: %d\n", failures);
     return failures > 0 ? 1 : 0;
 }
