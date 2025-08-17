@@ -3,17 +3,28 @@ CFLAGS = -Wall -g -O2 $(shell pkg-config --cflags libgcrypt libcurl)
 LDFLAGS = $(shell pkg-config --libs libgcrypt libcurl)
 SOURCES = knox.c crypt.c wallet.c mnemonic.c
 OBJECTS = $(SOURCES:.c=.o)
-EXECUTABLE = knox
+TARGET = knox
 
-all: $(EXECUTABLE)
+#Test file
+TEST_SOURCES = test_vectors.c mnemonic.c wallet.c
+TEST_OBJECTS = $(TEST_SOURCES:.c=.o)
+TEST_TARGET = test_vectors
 
-$(EXECUTABLE): $(OBJECTS)
+all: $(TARGET)
+
+$(TARGET): $(OBJECTS)
 		$(CC) $(OBJECTS) -o $@ $(LDFLAGS)
 
 %.o: %.c
 		$(CC) $(CFLAGS) -c $< -o $@
 
-clean:
-		rm -f $(OBJECTS) $(EXECUTABLE)
+test: $(TEST_TARGET)
+		sudo ./$(TEST_TARGET)
 
-.PHONY: all clean
+$(TEST_TARGET): $(TEST_SOURCES) $(TEST_OBJECTS)
+		$(CC) $(CFLAGS) $(TEST_SOURCES) -o $(TEST_TARGET) $(LDFLAGS)
+
+clean:
+		rm -f $(OBJECTS) $(TARGET)
+
+.PHONY: all test clean

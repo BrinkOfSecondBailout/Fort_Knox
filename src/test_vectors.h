@@ -2,6 +2,7 @@
 
 #ifndef TEST_VECTORS_H
 #define TEST_VECTORS_H
+#include "wallet.h"
 
 typedef struct {
 	const char *seed_hex;

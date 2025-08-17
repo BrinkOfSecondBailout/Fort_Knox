@@ -5,7 +5,35 @@
 #include <curl/curl.h>
 
 static const char *base58_chars = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-static const char *secp256k1_params = "(ecc (p #FFFFFFFFFFFFFFFEFFFFFFFC2F#) (a #0#) (b #7#) (g #79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798# #483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8#) (n #FFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141#) (h #1#))";
+// static const char *secp256k1_params = "(ecc (p #FFFFFFFFFFFFFFFEFFFFFFFC2F#) (a #0#) (b #7#) (g #79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798# #483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8#) (n #FFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141#) (h #1#))";
+
+int generate_master_key(const key_pair_t *seed_pair, key_pair_t *master) {
+	// Reconstruct full 64-byte seed from seed_pair
+	uint8_t seed[64];
+	memcpy(seed, seed_pair->key_priv, PRIVKEY_LENGTH);
+	memcpy(seed + PRIVKEY_LENGTH, seed_pair->chain_code, CHAINCODE_LENGTH);
+	
+	// Compute HMAC_SHA512
+	uint8_t hmac_output[64];
+	gcry_md_hd_t hmac;
+	if (gcry_md_open(&hmac, GCRY_MD_SHA512, GCRY_MD_FLAG_HMAC) != 0) return 1;
+	gcry_md_setkey(hmac, (const uint8_t *)"Bitcoin seed", strlen("Bitcoin seed"));
+	gcry_md_write(hmac, seed, 64);
+	memcpy(hmac_output, gcry_md_read(hmac, GCRY_MD_SHA512), 64);
+	gcry_md_close(hmac);
+	
+	// Split output: left 32 bytes = master priv key, right 32 bytes = master chain code
+	memset(master, 0, sizeof(key_pair_t));
+	memcpy(master->key_priv, hmac_output, PRIVKEY_LENGTH);
+	memcpy(master->chain_code, hmac_output + PRIVKEY_LENGTH, CHAINCODE_LENGTH);
+	// Construct extended private key (xprv payload, without full serialization)
+	memcpy(master->key_priv_extended, master->key_priv, PRIVKEY_LENGTH);
+	memcpy(master->key_priv_extended + PRIVKEY_LENGTH, master->chain_code, CHAINCODE_LENGTH);
+	// Optional: Computer master public key here if needed
+	// e.g., use gcry_pk_genkey or point multiplication to fill master->key_pub_compressed
+	master->key_index = 0; // Master is at depth 0
+	return 0;
+}
 
 int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child) {
 	uint8_t data[37];
@@ -55,8 +83,8 @@ int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child
     	gcry_mpi_release(child_priv_mpi);
 
     	// Child public key: use libgcrypt ECC to compute parent_pub + (IL * G)
-    	gcry_sexp_t curve, parent_pub_sexp, g_sexp, il_sexp, offset_point, child_pub_sexp;
-    	gcry_sexp_build(&curve, NULL, secp256k1_params);
+    	// gcry_sexp_t curve, parent_pub_sexp, g_sexp, il_sexp, offset_point, child_pub_sexp;
+    	// gcry_sexp_build(&curve, NULL, secp256k1_params);
     	
 	// Assume parent_pub_compressed is uncompressed for sexp; convert if needed
     	// For simplicity, assume we have parent_pub as sexp; implement conversion
@@ -86,11 +114,15 @@ char *base58_encode(const uint8_t *data, size_t data_len) {
 	// Convert to big int
 	size_t size = data_len * 138 / 100 + 1; // Approximate
 	uint8_t *temp = calloc(size, 1);
-	for (size_t j = 0; j < size; j++) {
-		carry += temp[j] * 256;
-		temp[j] = carry % 58;
-		carry /= 58;
+	for (size_t i = 0; i < data_len; i++) {
+		int carry = data[i];
+		for (size_t j = 0; j < size; j++) {
+			carry += temp[j] * 256;
+			temp[j] = carry % 58;
+			carry /= 58;
+		}
 	}
+	// Encode to chars
 	char *result = malloc(size + zeros + 1);
 	memset(result, '1', zeros);
 	size_t pos = zeros;
@@ -131,7 +163,7 @@ int generate_address(const uint8_t *key_pub_compressed, char *address, size_t ad
 }
 
 // Matching the parameters prototype of how curl expects their callback function
-static size_t curl_write_callback(void *contents, size_t size, size_t nmemb, void *userdata) {
+static size_t curl_write_callback_func(void *contents, size_t size, size_t nmemb, void *userdata) {
 	// Must match and return this size (bytes) for 'success'
 	size_t realsize = size * nmemb;
 	curl_buffer_t *mem = (curl_buffer_t *)userdata;
@@ -164,7 +196,7 @@ long long get_balance(const char **addresses, int num_addresses) {
 	// Set the behaviors for the curl handle
 	curl_buffer_t buffer = {0};
 	curl_easy_setopt(curl, CURLOPT_URL, url);
-    	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_callback);
+    	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_callback_func);
     	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buffer);
 	// Perform blocking network transfer
     	CURLcode res = curl_easy_perform(curl);
@@ -198,17 +230,17 @@ long long get_account_balance(key_pair_t *master_key, uint32_t account_index, in
 			derive_child_key(master_key, 44 | 0x80000000, &child); // m/44'
 			derive_child_key(&child, 0 | 0x80000000, &child); // m/44'/0'
 			derive_child_key(&child, account_index | 0x80000000, &child); // m/44'/0'/account'
-			derive_child_key(&child, change, &child) // m/44'/0'/account'/change
-			derive_child_key(&child, index, &child) // m/44'/0'/account'/change/index
+			derive_child_key(&child, change, &child); // m/44'/0'/account'/change
+			derive_child_key(&child, index, &child); // m/44'/0'/account'/change/index
 
 			char address[35];
-			generate_address(child.key_pub_compressed, address, sizeof(address);
+			generate_address(child.key_pub_compressed, address, sizeof(address));
 			if (addr_count > 0) strcat(addresses, ",");
 			strcat(addresses, address);
 			addr_count++;
 		}
 	}
-	long long balance = get_balance((const char *)&addresses, addr_count);
+	long long balance = get_balance((const char **)&addresses, addr_count);
 	free(addresses);
 	return balance;
 }

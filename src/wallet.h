@@ -25,4 +25,8 @@ typedef struct {
 	size_t size;
 } curl_buffer_t;
 
+int generate_master_key(const key_pair_t *, key_pair_t *);
+int derive_child_key(const key_pair_t *, uint32_t, key_pair_t *);
+long long get_account_balance(key_pair_t *, uint32_t, int);
+
 #endif
