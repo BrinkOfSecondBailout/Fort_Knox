@@ -5,6 +5,7 @@
 #include "wallet.h"
 #include "crypt.h"
 #include "mnemonic.h"
+#include "curl/curl.h"
 
 void zero(void *buf, size_t size) {
 	memset(buf, 0, size);
@@ -42,7 +43,7 @@ void print_commands() {
 	"- keys				Display all bitcoin addresses and corresponding private keys for each\n"
 	"- recover			Recovers your bitcoin wallet with mnemonic words(& passphrase, if set)\n"
 	"- receive			Receive bitcoin with a new bitcoin address\n"
-	"- balance			Display balance for all addresses in wallet\n"
+	"- balance			Display balance for all addresses in current wallet\n"
 	"- help				Safety practices, tips, and educational contents\n"
 	"- menu				Show all commands\n"
 	"- exit				Exit program\n\n");
@@ -63,7 +64,7 @@ int32 exit_handle() {
 }
 
 int32 new_handle() {
-	printf("Generating a standard BIP84 Bitcoin wallet...\n"
+	printf("Generating a standard BIP44 Bitcoin wallet...\n"
 		"If this program is running locally, strongly recommended that you disconnect from the internet for extra security\n");
 	key_pair_t key_pair = {0};
 	char mnemonic[256];
@@ -145,6 +146,9 @@ int32 new_handle() {
 }
 
 int32 balance_handle() {
+	curl_global_init(CURL_GLOBAL_DEFAULT);
+
+	curl_global_cleanup();
 	return 0;
 }
 

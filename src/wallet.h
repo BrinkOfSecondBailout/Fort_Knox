@@ -20,5 +20,9 @@ typedef struct {
 	uint8_t key_index;
 } key_pair_t;
 
+typedef struct {
+	char *data;
+	size_t size;
+} curl_buffer_t;
 
 #endif
