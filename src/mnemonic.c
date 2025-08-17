@@ -59,7 +59,7 @@ int mnemonic_to_seed(const char *mnemonic, const char *passphrase, key_pair_t *k
 	char salt[128];
 	snprintf(salt, sizeof(salt), "mnemonic%s", passphrase[0] ? passphrase : "");
         uint8_t seed[64];
-	gcry_error_t err = gcry_kdf_derive((const void *)mnemonic, strlen(mnemonic), GCRY_KDF_PBKDF2, GCRY_MD_SHA512, salt, strlen(salt), 2048UL, 64, seed);
+	gcry_error_t err = gcry_kdf_derive(mnemonic, strlen(mnemonic), GCRY_KDF_PBKDF2, GCRY_MD_SHA512, salt, strlen(salt), 2048UL, 64, seed);
 	if (err != 0) return 1;
         // Store in key_pair_t
         memcpy(key_pair->key_priv, seed, PRIVKEY_LENGTH);

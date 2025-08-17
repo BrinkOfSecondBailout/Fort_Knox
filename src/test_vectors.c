@@ -139,20 +139,19 @@ int test_seed_derivation(const char *mnemonic, const char *passphrase, const uin
         	printf("mnemonic_to_seed failed\n");
         	return 1;
     	}
-
     	// Reconstruct the 64-byte seed from key_pair (key_priv + chain_code)
     	uint8_t computed_seed[64];
     	memcpy(computed_seed, key_pair.key_priv, PRIVKEY_LENGTH);
     	memcpy(computed_seed + PRIVKEY_LENGTH, key_pair.chain_code, CHAINCODE_LENGTH);
 
     	// Compare with expected
-    	int pass = memcmp(computed_seed, expected_seed, 64) == 0;
-    	printf("Seed derivation (using mnemonic_to_seed): %s\n", pass ? "PASS" : "FAIL");
-    	if (!pass) {
-        	print_hex("Expected seed", expected_seed, 64);
-        	print_hex("Got seed", computed_seed, 64);
-    	}
-    	return !pass;
+	int pass = memcmp(computed_seed, expected_seed, 64) == 0;
+    	printf("Seed derivation (using mnemonic_to_seed): %s\n", pass ? "PASS" : "FAIL");	
+       	print_hex("Expect: ", expected_seed, 64);
+        print_hex("Result: ", computed_seed, 64);
+	printf("\n");
+	return !pass;
+
 }
 
 
@@ -162,14 +161,24 @@ int main() {
     // Test BIP-39 seed derivation (use known mnemonic from docs)
     const char *test_mnemonic = "legal winner thank year wave sausage worth useful legal winner thank yellow";
     const char *test_passphrase = "TREZOR";
-    const char *expected_seed = "2e8905819b8723fe2c1d161860e5ee1830318dbf49a83bd451cfb8440c28bd6fa457fe1296106559a3c80937a1c1069be3a3a5bd381ee6260e8d9739fce1f607";
-    failures += test_seed_derivation(test_mnemonic, test_passphrase, (const uint8_t *)expected_seed);
+    const char *expected_seed_hex = "2e8905819b8723fe2c1d161860e5ee1830318dbf49a83bd451cfb8440c28bd6fa457fe1296106559a3c80937a1c1069be3a3a5bd381ee6260e8d9739fce1f607";
+    uint8_t expected_seed[64];
+    hex_to_bytes(expected_seed_hex, expected_seed, 64);
+    failures += test_seed_derivation(test_mnemonic, test_passphrase, expected_seed);
 
-    const char *test_mnemonic2 = "letter advice cage absurd amount doctor acoustic avoid letter advice cage above";
+    const char *test_mnemonic2 = "hamster diagram private dutch cause delay private meat slide toddler razor book happy fancy gospel tennis maple dilemma loan word shrug inflict delay length";
     const char *test_passphrase2 = "TREZOR";
-    const char *expected_seed2 = "d71de856f81a8acc65e6fc851a38d4d7ec216fd0796d0a6827a3ad6ed5511a30fa280f12eb2e47ed2ac03b5c462a0358d18d69fe4f985ec81778c1b370b652a8";
-    failures += test_seed_derivation(test_mnemonic2, test_passphrase2, (const uint8_t *)expected_seed2);
+    const char *expected_seed_hex2 = "64c87cde7e12ecf6704ab95bb1408bef047c22db4cc7491c4271d170a1b213d20b385bc1588d9c7b38f1b39d415665b8a9030c9ec653d75e65f847d8fc1fc440";
+    uint8_t expected_seed2[64];
+    hex_to_bytes(expected_seed_hex2, expected_seed2, 64);
+    failures += test_seed_derivation(test_mnemonic2, test_passphrase2, expected_seed2);
 
+    const char *test_mnemonic3 = "void come effort suffer camp survey warrior heavy shoot primary clutch crush open amazing screen patrol group space point ten exist slush involve unfold";
+    const char *test_passphrase3 = "TREZOR";
+    const char *expected_seed_hex3 = "01f5bced59dec48e362f2c45b5de68b9fd6c92c6634f44d6d40aab69056506f0e35524a518034ddc1192e1dacd32c1ed3eaa3c3b131c88ed8e7e54c49a5d0998";
+    uint8_t expected_seed3[64];
+    hex_to_bytes(expected_seed_hex3, expected_seed3, 64);
+    failures += test_seed_derivation(test_mnemonic3, test_passphrase3, expected_seed3);
 
 
 /*
