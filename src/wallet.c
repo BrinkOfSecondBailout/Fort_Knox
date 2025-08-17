@@ -10,7 +10,7 @@ static const char *secp256k1_params = "(ecc (p #FFFFFFFFFFFFFFFEFFFFFFFC2F#) (a 
 int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child) {
 	uint8_t data[37];
 	size_t data_len;
-	int hardened = (index & 0x80000000) != 0;
+	int hardened = (index & 0x80000000) != 0; // 0: normal, 0x80000000: hardened
 	if (hardened) {
 		data[0] = 0x00;
 		memcpy(data + 1, parent->key_priv, PRIVKEY_LENGTH);
@@ -57,7 +57,8 @@ int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child
     	// Child public key: use libgcrypt ECC to compute parent_pub + (IL * G)
     	gcry_sexp_t curve, parent_pub_sexp, g_sexp, il_sexp, offset_point, child_pub_sexp;
     	gcry_sexp_build(&curve, NULL, secp256k1_params);
-    	// Assume parent_pub_compressed is uncompressed for sexp; convert if needed
+    	
+	// Assume parent_pub_compressed is uncompressed for sexp; convert if needed
     	// For simplicity, assume we have parent_pub as sexp; implement conversion
 	// gcry_sexp_build(&parent_pub_sexp, NULL, "(public-key (ecc (curve secp256k1) (q #parent_pub_uncomp#)))");
     	// gcry_sexp_build(&g_sexp, NULL, "(public-key (ecc (curve secp256k1) (q #04 79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798 483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8#)))");
@@ -210,12 +211,6 @@ long long get_account_balance(key_pair_t *master_key, uint32_t account_index, in
 	long long balance = get_balance((const char *)&addresses, addr_count);
 	free(addresses);
 	return balance;
-}
-
-void hex_to_bytes(const char *hex, uint8_t *bytes, size_t len) {
-	for (size_t i = 0; i < len; i++) {
-		sscanf(hex + 2 * i, "%2hhx", &bytes[i]);
-	}
 }
 
 
