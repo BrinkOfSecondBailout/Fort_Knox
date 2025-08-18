@@ -5,7 +5,123 @@
 #include <curl/curl.h>
 #include "test_vectors.h"
 static const char *base58_chars = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-// static const char *secp256k1_params = "(ecc (p #FFFFFFFFFFFFFFFEFFFFFFFC2F#) (a #0#) (b #7#) (g #79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798# #483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8#) (n #FFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141#) (h #1#))";
+static const char *secp256k1_params = "(ecc (p #FFFFFFFFFFFFFFFEFFFFFFFC2F#) (a #0#) (b #7#) (g #79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798# #483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8#) (n #FFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141#) (h #1#))";
+// Decompress compressed pub key to MPI x and y (for secp256k1)
+static int decompress_pubkey(const uint8_t *comp, gcry_mpi_t *x_out, gcry_mpi_t *y_out, gcry_mpi_t p) {
+	uint8_t prefix = comp[0];
+	if (prefix != 0x02 && prefix != 0x03) return 1;
+	gcry_mpi_t x = gcry_mpi_new(0);
+    	gcry_mpi_scan(&x, GCRYMPI_FMT_USG, comp + 1, 32, NULL);
+
+    	gcry_mpi_t alpha = gcry_mpi_new(0);
+    	gcry_mpi_t tmp = gcry_mpi_new(0);
+    	gcry_mpi_mul(tmp, x, x);
+    	gcry_mpi_mul(alpha, tmp, x);
+    	gcry_mpi_add_ui(alpha, alpha, 7);
+    	gcry_mpi_mod(alpha, alpha, p);
+
+    	gcry_mpi_t p1 = gcry_mpi_new(0);
+    	gcry_mpi_add_ui(p1, p, 1);
+    	gcry_mpi_rshift(p1, p1, 2); // (p + 1) / 4
+
+    	gcry_mpi_t beta = gcry_mpi_new(0);
+    	gcry_mpi_powm(beta, alpha, p1, p);
+
+   	gcry_mpi_t y = gcry_mpi_new(0);
+    	if (gcry_mpi_test_bit(beta, 0) == (prefix & 1)) {
+        	gcry_mpi_set(y, beta);
+    	} else {
+        	gcry_mpi_sub(y, p, beta);
+    	}
+
+    	*x_out = x;
+    	*y_out = y;
+
+    	gcry_mpi_release(tmp);
+    	gcry_mpi_release(alpha);
+    	gcry_mpi_release(p1);
+    	gcry_mpi_release(beta);
+    	return 0;
+}
+
+// Compress MPI x and y to 33-byte compressed pub key
+static int compress_pubkey(gcry_mpi_t x, gcry_mpi_t y, uint8_t *comp_out) {
+	uint8_t x_bytes[32];
+    	gcry_mpi_print(GCRYMPI_FMT_USG, x_bytes, 32, NULL, x);
+    	uint8_t prefix = gcry_mpi_test_bit(y, 0) == 0 ? 0x02 : 0x03;
+    	comp_out[0] = prefix;
+    	memcpy(comp_out + 1, x_bytes, 32);
+    	return 0;
+}
+
+// Generate compressed pub key from priv key(secp256k1)
+int generate_public_key(const uint8_t *priv_key, uint8_t *pub_key_compressed) {
+	// Initialize ECC context for secp256k1
+    	gcry_ctx_t ctx;
+    	if (gcry_mpi_ec_new(&ctx, NULL, "secp256k1") != 0) return 1;
+
+    	// Convert private key to MPI
+    	gcry_mpi_t priv_mpi;
+    	if (gcry_mpi_scan(&priv_mpi, GCRYMPI_FMT_USG, priv_key, PRIVKEY_LENGTH, NULL) != 0) {
+        	gcry_ctx_release(ctx);
+        	return 1;
+    	}
+
+    	// Get generator point G
+    	gcry_mpi_point_t g_point = gcry_mpi_ec_get_point("g", ctx, 0);
+    	if (!g_point) {
+        	gcry_mpi_release(priv_mpi);
+        	gcry_ctx_release(ctx);
+        	return 1;
+    	}
+
+    	// Compute public key point: pub = priv * G
+    	gcry_mpi_point_t pub_point = gcry_mpi_point_new(0);
+    	if (!pub_point) {
+        	gcry_mpi_point_release(g_point);
+        	gcry_mpi_release(priv_mpi);
+        	gcry_ctx_release(ctx);
+        	return 1;
+    	}
+    	gcry_mpi_ec_mul(pub_point, priv_mpi, g_point, ctx);
+
+    	// Extract affine coordinates (x, y)
+   	gcry_mpi_t x = gcry_mpi_new(0);
+    	gcry_mpi_t y = gcry_mpi_new(0);
+    	if (gcry_mpi_ec_get_affine(x, y, pub_point, ctx) != 0) {
+        	gcry_mpi_release(x);
+        	gcry_mpi_release(y);
+        	gcry_mpi_point_release(pub_point);
+        	gcry_mpi_point_release(g_point);
+        	gcry_mpi_release(priv_mpi);
+        	gcry_ctx_release(ctx);
+        	return 1;
+    	}
+
+    	// Compress public key: 0x02/0x03 + x-coordinate
+    	uint8_t x_bytes[32];
+   	if (gcry_mpi_print(GCRYMPI_FMT_USG, x_bytes, 32, NULL, x) != 0) {
+        	gcry_mpi_release(x);
+        	gcry_mpi_release(y);
+        	gcry_mpi_point_release(pub_point);
+        	gcry_mpi_point_release(g_point);
+        	gcry_mpi_release(priv_mpi);
+        	gcry_ctx_release(ctx);
+        	return 1;
+    	}
+
+    	pub_key_compressed[0] = gcry_mpi_test_bit(y, 0) == 0 ? 0x02 : 0x03; // Even/odd y
+    	memcpy(pub_key_compressed + 1, x_bytes, 32);
+
+    	// Cleanup
+    	gcry_mpi_release(x);
+    	gcry_mpi_release(y);
+    	gcry_mpi_point_release(pub_point);
+    	gcry_mpi_point_release(g_point);
+    	gcry_mpi_release(priv_mpi);
+    	gcry_ctx_release(ctx);
+    	return 0;
+}
 
 int generate_master_key(const key_pair_t *seed_pair, size_t seed_len, key_pair_t *master) {
 	if (seed_len < 16 || seed_len > 64) return 1;
@@ -18,6 +134,20 @@ int generate_master_key(const key_pair_t *seed_pair, size_t seed_len, key_pair_t
 	memcpy(hmac_output, gcry_md_read(hmac, GCRY_MD_SHA512), 64);
 	gcry_md_close(hmac);
 	
+	/*
+	// Validate private key
+    	gcry_mpi_t priv_mpi, n_mpi;
+    	gcry_mpi_scan(&priv_mpi, GCRYMPI_FMT_USG, hmac_output, PRIVKEY_LENGTH, NULL);
+    	gcry_mpi_scan(&n_mpi, GCRYMPI_FMT_HEX, "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141", 0, NULL);
+    	if (gcry_mpi_cmp_ui(priv_mpi, 0) == 0 || gcry_mpi_cmp(priv_mpi, n_mpi) >= 0) {
+        	gcry_mpi_release(priv_mpi);
+        	gcry_mpi_release(n_mpi);
+        	return 1;
+    	}
+    	gcry_mpi_release(priv_mpi);
+    	gcry_mpi_release(n_mpi);
+	*/
+
 	// Split output: left 32 bytes = master priv key, right 32 bytes = master chain code
 	memset(master, 0, sizeof(key_pair_t));
 	memcpy(master->key_priv, hmac_output, PRIVKEY_LENGTH);
@@ -25,14 +155,19 @@ int generate_master_key(const key_pair_t *seed_pair, size_t seed_len, key_pair_t
 	// Construct extended private key (xprv payload, without full serialization)
 	memcpy(master->key_priv_extended, master->key_priv, PRIVKEY_LENGTH);
 	memcpy(master->key_priv_extended + PRIVKEY_LENGTH, master->chain_code, CHAINCODE_LENGTH);
-	// Optional: Computer master public key here if needed
-	// e.g., use gcry_pk_genkey or point multiplication to fill master->key_pub_compressed
+	// Generate master public key
+	if (generate_public_key(master->key_priv, master->key_pub_compressed) != 0) {
+		return 1;
+	}
+	memcpy(master->key_pub_extended, master->key_pub_compressed, PUBKEY_LENGTH);
+	memcpy(master->key_pub_extended + PUBKEY_LENGTH, master->chain_code, CHAINCODE_LENGTH);
 	master->key_index = 0; // Master is at depth 0
 	return 0;
 }
 
+
 int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child) {
-	uint8_t data[37];
+	uint8_t data[37]; // For HMAC input, 1 + 32 priv + 4 index or 33 pub + 4 index
 	size_t data_len;
 	int hardened = (index & 0x80000000) != 0; // 0: normal, 0x80000000: hardened
 	if (hardened) {
@@ -53,12 +188,13 @@ int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child
     	uint8_t hmac_output[64];
     	gcry_md_hd_t hmac;
     	if (gcry_md_open(&hmac, GCRY_MD_SHA512, GCRY_MD_FLAG_HMAC) != 0) return 1;
+	// Set key to parent chain code
     	gcry_md_setkey(hmac, parent->chain_code, CHAINCODE_LENGTH);
     	gcry_md_write(hmac, data, data_len);
     	memcpy(hmac_output, gcry_md_read(hmac, GCRY_MD_SHA512), 64);
     	gcry_md_close(hmac);
 
-    	// IL = offset (left 32 bytes), child_chain_code = right 32 bytes
+    	// IL = child offset (left 32 bytes) that's used to generate child private key, IR = child_chain_code (right 32 bytes)
     	uint8_t il[PRIVKEY_LENGTH];
     	memcpy(il, hmac_output, PRIVKEY_LENGTH);
     	memcpy(child->chain_code, hmac_output + PRIVKEY_LENGTH, CHAINCODE_LENGTH);
@@ -74,9 +210,6 @@ int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child
     	gcry_mpi_release(il_mpi);
     	gcry_mpi_release(n_mpi);
 
-    	// Export child private key
-    	gcry_mpi_print(GCRYMPI_FMT_USG, child->key_priv, PRIVKEY_LENGTH, NULL, child_priv_mpi);
-    	gcry_mpi_release(child_priv_mpi);
 
     	// Child public key: use libgcrypt ECC to compute parent_pub + (IL * G)
     	// gcry_sexp_t curve, parent_pub_sexp, g_sexp, il_sexp, offset_point, child_pub_sexp;
@@ -84,7 +217,7 @@ int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child
     	
 	// Assume parent_pub_compressed is uncompressed for sexp; convert if needed
     	// For simplicity, assume we have parent_pub as sexp; implement conversion
-	// gcry_sexp_build(&parent_pub_sexp, NULL, "(public-key (ecc (curve secp256k1) (q #parent_pub_uncomp#)))");
+	/// gcry_sexp_build(&parent_pub_sexp, NULL, "(public-key (ecc (curve secp256k1) (q #parent_pub_uncomp#)))");
     	// gcry_sexp_build(&g_sexp, NULL, "(public-key (ecc (curve secp256k1) (q #04 79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798 483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8#)))");
     	// gcry_pk_mul(&offset_point, g_sexp, il_sexp);
     	// gcry_pk_add(&child_pub_sexp, parent_pub_sexp, offset_point);
@@ -92,7 +225,20 @@ int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child
 
     	// For now, skip full pubkey derivation if not needed; add as per your codebase
 
-    	// Update extended keys
+    	size_t written;
+	if (gcry_mpi_print(GCRYMPI_FMT_USG, child->key_priv, PRIVKEY_LENGTH, &written, child_priv_mpi) != 0) {
+       		gcry_mpi_release(child_priv_mpi);
+        	return 1;
+    	}
+    	gcry_mpi_release(child_priv_mpi);
+    	if (written != PRIVKEY_LENGTH) {
+        	return 1; // Ensure exactly 32 bytes
+    	}
+    	// Generate child public key
+    	if (generate_public_key(child->key_priv, child->key_pub_compressed) != 0) {
+        	return 1;
+    	}
+	// Update extended keys
     	memcpy(child->key_priv_extended, child->key_priv, PRIVKEY_LENGTH);
     	memcpy(child->key_priv_extended + PRIVKEY_LENGTH, child->chain_code, CHAINCODE_LENGTH);
     	memcpy(child->key_pub_extended, child->key_pub_compressed, PUBKEY_LENGTH);
