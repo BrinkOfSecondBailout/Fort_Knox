@@ -15,7 +15,7 @@ static const bip32_test_vector_t test_vectors[] = {
 	"873dff81c02f525623fd1fe5167eac3a55a049de3d314bb42ee227ffed37d508",
 	// All paths
         {"m/0'", "m/0'/1", "m/0'/1/2'", "m/0'/1/2'/2", "m/0'/1/2'/2/1000000000"},
-        // Child private keys for respective path
+        // Private keys for respective path
 	{
 	    "edb2e14f9ee77d26dd93b4ecede8d16ed408ce149b6cd80b0715a2d911a0afea",
             "3c6cb8d0f6a264c91ea8b5030fadaa8e538b020f0a387421a12de9319dc93368",
@@ -23,7 +23,7 @@ static const bip32_test_vector_t test_vectors[] = {
             "0f479245fb19a38a1954c5c7c0ebab2f9bdfd96a17563ef28a6a4b1a2a764ef4",
             "471b76e389e528d6de6d816857e012c5455051cad6660850e58372a6c3e6e7c8"
         },
-	// Child chain code for respective path
+	// Chain code for respective path
         {
             "47fdacbd0f1097043b78c63c20c34ef4ed9a111d980047ad16282c7ae6236141",
             "2a7857631386ba23dacac34180dd1983734e444fdbf774041578e9b6adb37c19",
@@ -101,27 +101,31 @@ int test_seed_derivation(const char *mnemonic, const char *passphrase, const uin
 
 int run_mnemonic_test() {
 	int failures = 0;
- 	// Test BIP-39 seed derivation (use known mnemonic from docs, according to the doc, all of the test cases have "TREZOR" as the passphrase)
+ 	// Test BIP-39 seed derivation (using known mnemonic from docs) 
+	// according to doc, all test cases have "TREZOR" as the passphrase)
     	// Test case 1
 	const char *test_mnemonic = "legal winner thank year wave sausage worth useful legal winner thank yellow";
     	const char *test_passphrase = "TREZOR";
     	const char *expected_seed_hex = "2e8905819b8723fe2c1d161860e5ee1830318dbf49a83bd451cfb8440c28bd6fa457fe1296106559a3c80937a1c1069be3a3a5bd381ee6260e8d9739fce1f607";
-    	uint8_t expected_seed[64];
-    	hex_to_bytes(expected_seed_hex, expected_seed, 64);
+    	uint8_t expected_seed[SEED_LENGTH];
+	resize_convert_hex_to_bytes(expected_seed_hex, expected_seed);
+    	printf("Seed Derivation Test Case 1\n");	
     	failures += test_seed_derivation(test_mnemonic, test_passphrase, expected_seed);
     	// Test case 2
 	const char *test_mnemonic2 = "hamster diagram private dutch cause delay private meat slide toddler razor book happy fancy gospel tennis maple dilemma loan word shrug inflict delay length";
     	const char *test_passphrase2 = "TREZOR";
     	const char *expected_seed_hex2 = "64c87cde7e12ecf6704ab95bb1408bef047c22db4cc7491c4271d170a1b213d20b385bc1588d9c7b38f1b39d415665b8a9030c9ec653d75e65f847d8fc1fc440";
-    	uint8_t expected_seed2[64];
-    	hex_to_bytes(expected_seed_hex2, expected_seed2, 64);
+    	uint8_t expected_seed2[SEED_LENGTH];
+    	resize_convert_hex_to_bytes(expected_seed_hex2, expected_seed2);
+	printf("Seed Derivation Test Case 2\n");
     	failures += test_seed_derivation(test_mnemonic2, test_passphrase2, expected_seed2);
     	// Test case 3
 	const char *test_mnemonic3 = "void come effort suffer camp survey warrior heavy shoot primary clutch crush open amazing screen patrol group space point ten exist slush involve unfold";
     	const char *test_passphrase3 = "TREZOR";
     	const char *expected_seed_hex3 = "01f5bced59dec48e362f2c45b5de68b9fd6c92c6634f44d6d40aab69056506f0e35524a518034ddc1192e1dacd32c1ed3eaa3c3b131c88ed8e7e54c49a5d0998";
-    	uint8_t expected_seed3[64];
-    	hex_to_bytes(expected_seed_hex3, expected_seed3, 64);
+    	uint8_t expected_seed3[SEED_LENGTH];
+	resize_convert_hex_to_bytes(expected_seed_hex3, expected_seed3);
+    	printf("Seed Derivation Test Case 3\n");
     	failures += test_seed_derivation(test_mnemonic3, test_passphrase3, expected_seed3);
 	return failures;
 }
@@ -196,7 +200,6 @@ int run_master_and_child_test() {
 		resize_convert_hex_to_bytes(tv->master_priv_hex, priv);
 		uint8_t chain[CHAINCODE_LENGTH];
 		resize_convert_hex_to_bytes(tv->master_chain_hex, chain);
-
 		// Test master key 
 		// (important to pass in explicit seed len since seed sizes can vary 
 		// and with padding it could produce the wrong rsult if length not specified)
@@ -205,9 +208,17 @@ int run_master_and_child_test() {
         	// Test child keys
         	key_pair_t master = {0};
         	// Populate master from test (using test vector's given private keys and chain code)
+		uint8_t master_priv[PRIVKEY_LENGTH];
+		resize_convert_hex_to_bytes(tv->master_priv_hex, master_priv);
+		memcpy(master.key_priv, master_priv, PRIVKEY_LENGTH);
+		uint8_t master_chain[CHAINCODE_LENGTH];
+		resize_convert_hex_to_bytes(tv->master_chain_hex, master_chain);
+		memcpy(master.chain_code, master_chain, CHAINCODE_LENGTH);
+		/*
         	hex_to_bytes(tv->master_priv_hex, master.key_priv, PRIVKEY_LENGTH);
         	hex_to_bytes(tv->master_chain_hex, master.chain_code, CHAINCODE_LENGTH);
-        	// Assume pubkey is derived; for test, focus on priv/chain
+        	*/
+		// Assume pubkey is derived; for test, focus on priv/chain
 
         	for (int c = 0; tv->paths[c]; c++) {
 			uint8_t child_priv[PRIVKEY_LENGTH];
