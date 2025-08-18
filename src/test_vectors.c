@@ -7,17 +7,23 @@
 // BIP-32 test vectors (from Bitcoin wiki)
 static const bip32_test_vector_t test_vectors[] = {
     { // Test Vector 1
+	// Seed (chain m)
         "000102030405060708090a0b0c0d0e0f",
-        "e8f32e723decf4051aefac8e2c93c9c5b214313817cdb01a1494b917c8436b35",
-        "873dff81c02f525623fd1fe5167eac3a55a049de3d314bb42ee227ffed37d508",
+        // Master private key
+	"e8f32e723decf4051aefac8e2c93c9c5b214313817cdb01a1494b917c8436b35",
+        // Master chain code
+	"873dff81c02f525623fd1fe5167eac3a55a049de3d314bb42ee227ffed37d508",
+	// All paths
         {"m/0'", "m/0'/1", "m/0'/1/2'", "m/0'/1/2'/2", "m/0'/1/2'/2/1000000000"},
-        {
+        // Child private keys for respective path
+	{
 	    "edb2e14f9ee77d26dd93b4ecede8d16ed408ce149b6cd80b0715a2d911a0afea",
             "3c6cb8d0f6a264c91ea8b5030fadaa8e538b020f0a387421a12de9319dc93368",
             "cbce0d719ecf7431d88e6a89fa1483e02e35092af60c042b1df2ff59fa424dca",
             "0f479245fb19a38a1954c5c7c0ebab2f9bdfd96a17563ef28a6a4b1a2a764ef4",
             "471b76e389e528d6de6d816857e012c5455051cad6660850e58372a6c3e6e7c8"
         },
+	// Child chain code for respective path
         {
             "47fdacbd0f1097043b78c63c20c34ef4ed9a111d980047ad16282c7ae6236141",
             "2a7857631386ba23dacac34180dd1983734e444fdbf774041578e9b6adb37c19",
@@ -59,41 +65,60 @@ void hex_to_bytes(const char *hex, uint8_t *bytes, size_t len) {
 }
 
 // Helper: Print hex
-void print_hex(const char *label, const uint8_t *data, size_t len) {
+void print_as_hex(const char *label, const uint8_t *data, size_t len) {
     printf("%s: ", label);
     for (size_t i = 0; i < len; i++) printf("%02x", data[i]);
     printf("\n");
 }
 
-// Test master key generation
-int test_master_key(const uint8_t *seed, size_t seed_len, const uint8_t *expected_priv, const uint8_t *expected_chain) {
-	// Prepare seed_pair from seed (split into key_priv and chain_code)
-    	key_pair_t seed_pair = {0};
-    	memcpy(seed_pair.key_priv, seed, PRIVKEY_LENGTH);
-    	memcpy(seed_pair.chain_code, seed + PRIVKEY_LENGTH, CHAINCODE_LENGTH);
+// Test seed derivation (BIP-39)
+int test_seed_derivation(const char *mnemonic, const char *passphrase, const uint8_t *expected_seed) {
+	key_pair_t key_pair = {0}; // Initialize empty key_pair_t
 
-    	// Call your generate_master_key function
-    	key_pair_t master = {0};
-    	if (generate_master_key(&seed_pair, &master) != 0) {
-        	printf("generate_master_key failed\n");
+    	// Call your mnemonic_to_seed function
+    	if (mnemonic_to_seed(mnemonic, passphrase, &key_pair) != 0) {
+        	printf("mnemonic_to_seed failed\n");
         	return 1;
     	}
+    	// Reconstruct the 64-byte seed from key_pair (key_priv + chain_code)
+    	uint8_t computed_seed[64];
+    	memcpy(computed_seed, key_pair.key_priv, PRIVKEY_LENGTH);
+    	memcpy(computed_seed + PRIVKEY_LENGTH, key_pair.chain_code, CHAINCODE_LENGTH);
 
     	// Compare with expected
-    	uint8_t exp_priv[PRIVKEY_LENGTH], exp_chain[CHAINCODE_LENGTH];
-    	hex_to_bytes((const char *)expected_priv, exp_priv, PRIVKEY_LENGTH);
-    	hex_to_bytes((const char *)expected_chain, exp_chain, CHAINCODE_LENGTH);
+	int pass = memcmp(computed_seed, expected_seed, 64) == 0;
+    	printf("Seed derivation (using mnemonic_to_seed): %s\n", pass ? GREEN"[ PASS ]"RESET : RED"[ FAIL] "RESET);	
+       	print_as_hex("Expect: ", expected_seed, 64);
+        print_as_hex("Result: ", computed_seed, 64);
+	printf("\n");
+	return !pass;
+}
 
-    	int pass = memcmp(master.key_priv, exp_priv, PRIVKEY_LENGTH) == 0 &&
-               memcmp(master.chain_code, exp_chain, CHAINCODE_LENGTH) == 0;
-    	printf("Master key generation (using generate_master_key): %s\n", pass ? "PASS" : "FAIL");
-    	if (!pass) {
-        	print_hex("Expected master priv", exp_priv, PRIVKEY_LENGTH);
-        	print_hex("Got master priv", master.key_priv, PRIVKEY_LENGTH);
-        	print_hex("Expected master chain", exp_chain, CHAINCODE_LENGTH);
-        	print_hex("Got master chain", master.chain_code, CHAINCODE_LENGTH);
-    	}
-    	return !pass;
+int run_mnemonic_test() {
+	int failures = 0;
+ 	// Test BIP-39 seed derivation (use known mnemonic from docs, according to the doc, all of the test cases have "TREZOR" as the passphrase)
+    	// Test case 1
+	const char *test_mnemonic = "legal winner thank year wave sausage worth useful legal winner thank yellow";
+    	const char *test_passphrase = "TREZOR";
+    	const char *expected_seed_hex = "2e8905819b8723fe2c1d161860e5ee1830318dbf49a83bd451cfb8440c28bd6fa457fe1296106559a3c80937a1c1069be3a3a5bd381ee6260e8d9739fce1f607";
+    	uint8_t expected_seed[64];
+    	hex_to_bytes(expected_seed_hex, expected_seed, 64);
+    	failures += test_seed_derivation(test_mnemonic, test_passphrase, expected_seed);
+    	// Test case 2
+	const char *test_mnemonic2 = "hamster diagram private dutch cause delay private meat slide toddler razor book happy fancy gospel tennis maple dilemma loan word shrug inflict delay length";
+    	const char *test_passphrase2 = "TREZOR";
+    	const char *expected_seed_hex2 = "64c87cde7e12ecf6704ab95bb1408bef047c22db4cc7491c4271d170a1b213d20b385bc1588d9c7b38f1b39d415665b8a9030c9ec653d75e65f847d8fc1fc440";
+    	uint8_t expected_seed2[64];
+    	hex_to_bytes(expected_seed_hex2, expected_seed2, 64);
+    	failures += test_seed_derivation(test_mnemonic2, test_passphrase2, expected_seed2);
+    	// Test case 3
+	const char *test_mnemonic3 = "void come effort suffer camp survey warrior heavy shoot primary clutch crush open amazing screen patrol group space point ten exist slush involve unfold";
+    	const char *test_passphrase3 = "TREZOR";
+    	const char *expected_seed_hex3 = "01f5bced59dec48e362f2c45b5de68b9fd6c92c6634f44d6d40aab69056506f0e35524a518034ddc1192e1dacd32c1ed3eaa3c3b131c88ed8e7e54c49a5d0998";
+    	uint8_t expected_seed3[64];
+    	hex_to_bytes(expected_seed_hex3, expected_seed3, 64);
+    	failures += test_seed_derivation(test_mnemonic3, test_passphrase3, expected_seed3);
+	return failures;
 }
 
 // Test child key derivation
@@ -120,92 +145,78 @@ int test_child_derivation(const key_pair_t *master, const char *path, const uint
 
     int pass = memcmp(current.key_priv, exp_priv, PRIVKEY_LENGTH) == 0 &&
                memcmp(current.chain_code, exp_chain, CHAINCODE_LENGTH) == 0;
-    printf("Child derivation (%s): %s\n", path, pass ? "PASS" : "FAIL");
+    printf("Child derivation (%s): %s\n", path, pass ? GREEN"[ PASS ]"RESET : RED"[ FAIL ]"RESET);
     if (!pass) {
-        print_hex("Expected child priv", exp_priv, PRIVKEY_LENGTH);
-        print_hex("Got child priv", current.key_priv, PRIVKEY_LENGTH);
-        print_hex("Expected child chain", exp_chain, CHAINCODE_LENGTH);
-        print_hex("Got child chain", current.chain_code, CHAINCODE_LENGTH);
+        print_as_hex("Expected child priv", exp_priv, PRIVKEY_LENGTH);
+        print_as_hex("Got child priv", current.key_priv, PRIVKEY_LENGTH);
+        print_as_hex("Expected child chain", exp_chain, CHAINCODE_LENGTH);
+        print_as_hex("Got child chain", current.chain_code, CHAINCODE_LENGTH);
     }
     return !pass;
 }
-
-// Test seed derivation (BIP-39)
-int test_seed_derivation(const char *mnemonic, const char *passphrase, const uint8_t *expected_seed) {
-	key_pair_t key_pair = {0}; // Initialize empty key_pair_t
-
-    	// Call your mnemonic_to_seed function
-    	if (mnemonic_to_seed(mnemonic, passphrase, &key_pair) != 0) {
-        	printf("mnemonic_to_seed failed\n");
+   
+// Test master key generation
+int test_master_key(const uint8_t *seed, size_t seed_len, const uint8_t *expected_priv, const uint8_t *expected_chain) {
+	// Prepare seed_pair from seed (split into key_priv and chain_code)
+    	key_pair_t seed_pair = {0};
+	memcpy(seed_pair.seed, seed, seed_len);
+    	memcpy(seed_pair.key_priv, seed, PRIVKEY_LENGTH);
+    	memcpy(seed_pair.chain_code, seed + PRIVKEY_LENGTH, CHAINCODE_LENGTH);
+    	
+	// Call your generate_master_key function
+    	key_pair_t master = {0};
+    	if (generate_master_key(&seed_pair, seed_len, &master) != 0) {
+        	printf("generate_master_key failed\n");
         	return 1;
     	}
-    	// Reconstruct the 64-byte seed from key_pair (key_priv + chain_code)
-    	uint8_t computed_seed[64];
-    	memcpy(computed_seed, key_pair.key_priv, PRIVKEY_LENGTH);
-    	memcpy(computed_seed + PRIVKEY_LENGTH, key_pair.chain_code, CHAINCODE_LENGTH);
 
-    	// Compare with expected
-	int pass = memcmp(computed_seed, expected_seed, 64) == 0;
-    	printf("Seed derivation (using mnemonic_to_seed): %s\n", pass ? "PASS" : "FAIL");	
-       	print_hex("Expect: ", expected_seed, 64);
-        print_hex("Result: ", computed_seed, 64);
-	printf("\n");
+    	int pass = memcmp(master.key_priv, expected_priv, PRIVKEY_LENGTH) == 0 &&
+               	   memcmp(master.chain_code, expected_chain, CHAINCODE_LENGTH) == 0;
+    	printf("Master key generation (using generate_master_key): %s\n", pass ? GREEN"[ PASS ]"RESET : RED"[ FAIL ]"RESET);
+        print_as_hex("Expected master priv", expected_priv, PRIVKEY_LENGTH);
+        print_as_hex("Got master priv", master.key_priv, PRIVKEY_LENGTH);
+        print_as_hex("Expected master chain", expected_chain, CHAINCODE_LENGTH);
+        print_as_hex("Got master chain", master.chain_code, CHAINCODE_LENGTH);
+    	printf("\n");
 	return !pass;
-
 }
 
+int run_master_and_child_test() {
+	int failures = 0;
+	// Test BIP-32 master and child for each vector
+    	for (int v = 0; v < num_test_vectors; v++) {
+        	const bip32_test_vector_t *tv = &test_vectors[v];
+        	uint8_t seed[SEED_LENGTH];
+        	size_t seed_len = strlen(tv->seed_hex) / 2;
+        	hex_to_bytes(tv->seed_hex, seed, seed_len);
+		uint8_t priv[PRIVKEY_LENGTH];
+		size_t priv_len = strlen(tv->master_priv_hex) / 2;
+		hex_to_bytes(tv->master_priv_hex, priv, priv_len);
+		uint8_t chain[CHAINCODE_LENGTH];
+		size_t chain_len = strlen(tv->master_chain_hex) / 2;
+		hex_to_bytes(tv->master_chain_hex, chain, chain_len);
+        	// Test master key
+        	failures += test_master_key(seed, seed_len, priv, chain);
+
+        	// Test child keys
+        	key_pair_t master = {0};
+        	// Populate master from test (in production, derive from seed)
+        	hex_to_bytes(tv->master_priv_hex, master.key_priv, PRIVKEY_LENGTH);
+        	hex_to_bytes(tv->master_chain_hex, master.chain_code, CHAINCODE_LENGTH);
+        	// Assume pubkey is derived; for test, focus on priv/chain
+
+        	for (int c = 0; tv->paths[c]; c++) {
+            		failures += test_child_derivation(&master, tv->paths[c], (const uint8_t *)tv->child_priv_hex[c], (const uint8_t *)tv->child_chain_hex[c]);
+        	}
+    	}
+	return failures;
+}
 
 int main() {
-    int failures = 0;
-
-    // Test BIP-39 seed derivation (use known mnemonic from docs)
-    const char *test_mnemonic = "legal winner thank year wave sausage worth useful legal winner thank yellow";
-    const char *test_passphrase = "TREZOR";
-    const char *expected_seed_hex = "2e8905819b8723fe2c1d161860e5ee1830318dbf49a83bd451cfb8440c28bd6fa457fe1296106559a3c80937a1c1069be3a3a5bd381ee6260e8d9739fce1f607";
-    uint8_t expected_seed[64];
-    hex_to_bytes(expected_seed_hex, expected_seed, 64);
-    failures += test_seed_derivation(test_mnemonic, test_passphrase, expected_seed);
-
-    const char *test_mnemonic2 = "hamster diagram private dutch cause delay private meat slide toddler razor book happy fancy gospel tennis maple dilemma loan word shrug inflict delay length";
-    const char *test_passphrase2 = "TREZOR";
-    const char *expected_seed_hex2 = "64c87cde7e12ecf6704ab95bb1408bef047c22db4cc7491c4271d170a1b213d20b385bc1588d9c7b38f1b39d415665b8a9030c9ec653d75e65f847d8fc1fc440";
-    uint8_t expected_seed2[64];
-    hex_to_bytes(expected_seed_hex2, expected_seed2, 64);
-    failures += test_seed_derivation(test_mnemonic2, test_passphrase2, expected_seed2);
-
-    const char *test_mnemonic3 = "void come effort suffer camp survey warrior heavy shoot primary clutch crush open amazing screen patrol group space point ten exist slush involve unfold";
-    const char *test_passphrase3 = "TREZOR";
-    const char *expected_seed_hex3 = "01f5bced59dec48e362f2c45b5de68b9fd6c92c6634f44d6d40aab69056506f0e35524a518034ddc1192e1dacd32c1ed3eaa3c3b131c88ed8e7e54c49a5d0998";
-    uint8_t expected_seed3[64];
-    hex_to_bytes(expected_seed_hex3, expected_seed3, 64);
-    failures += test_seed_derivation(test_mnemonic3, test_passphrase3, expected_seed3);
-
-
-/*
-    // Test BIP-32 master and child for each vector
-    for (int v = 0; v < num_test_vectors; v++) {
-        const bip32_test_vector_t *tv = &test_vectors[v];
-        uint8_t seed[64];
-        size_t seed_len = strlen(tv->seed_hex) / 2;
-        hex_to_bytes(tv->seed_hex, seed, seed_len);
-
-        // Test master key
-        failures += test_master_key(seed, seed_len, (const uint8_t *)tv->master_priv_hex, (const uint8_t *)tv->master_chain_hex);
-
-        // Test child keys
-        key_pair_t master = {0};
-        // Populate master from test (in production, derive from seed)
-        hex_to_bytes(tv->master_priv_hex, master.key_priv, PRIVKEY_LENGTH);
-        hex_to_bytes(tv->master_chain_hex, master.chain_code, CHAINCODE_LENGTH);
-        // Assume pubkey is derived; for test, focus on priv/chain
-
-        for (int c = 0; tv->paths[c]; c++) {
-            failures += test_child_derivation(&master, tv->paths[c], (const uint8_t *)tv->child_priv_hex[c], (const uint8_t *)tv->child_chain_hex[c]);
-        }
-    }
-*/
- 
-    printf("Total failures: %d\n", failures);
-    return failures > 0 ? 1 : 0;
+	int failures = 0; 
+//	failures += run_mnenomic_test();
+	failures += run_master_and_child_test(); 
+    	printf("Total failures: %d\n", failures);
+    	return failures > 0 ? 1 : 0;
 }
 

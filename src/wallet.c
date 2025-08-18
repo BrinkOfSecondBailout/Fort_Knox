@@ -3,22 +3,18 @@
 #include "wallet.h"
 #include <gcrypt.h>
 #include <curl/curl.h>
-
+#include "test_vectors.h"
 static const char *base58_chars = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 // static const char *secp256k1_params = "(ecc (p #FFFFFFFFFFFFFFFEFFFFFFFC2F#) (a #0#) (b #7#) (g #79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798# #483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8#) (n #FFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141#) (h #1#))";
 
-int generate_master_key(const key_pair_t *seed_pair, key_pair_t *master) {
-	// Reconstruct full 64-byte seed from seed_pair
-	uint8_t seed[64];
-	memcpy(seed, seed_pair->key_priv, PRIVKEY_LENGTH);
-	memcpy(seed + PRIVKEY_LENGTH, seed_pair->chain_code, CHAINCODE_LENGTH);
-	
+int generate_master_key(const key_pair_t *seed_pair, size_t seed_len, key_pair_t *master) {
+	if (seed_len < 16 || seed_len > 64) return 1;
 	// Compute HMAC_SHA512
 	uint8_t hmac_output[64];
 	gcry_md_hd_t hmac;
 	if (gcry_md_open(&hmac, GCRY_MD_SHA512, GCRY_MD_FLAG_HMAC) != 0) return 1;
 	gcry_md_setkey(hmac, (const uint8_t *)"Bitcoin seed", strlen("Bitcoin seed"));
-	gcry_md_write(hmac, seed, 64);
+	gcry_md_write(hmac, seed_pair->seed, seed_len);
 	memcpy(hmac_output, gcry_md_read(hmac, GCRY_MD_SHA512), 64);
 	gcry_md_close(hmac);
 	

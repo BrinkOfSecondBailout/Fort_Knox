@@ -13,4 +13,6 @@ typedef struct {
 	const char *child_chain_hex[5];
 } bip32_test_vector_t;
 
+void print_as_hex(const char *, const uint8_t *, size_t);
+
 #endif

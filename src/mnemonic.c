@@ -62,6 +62,7 @@ int mnemonic_to_seed(const char *mnemonic, const char *passphrase, key_pair_t *k
 	gcry_error_t err = gcry_kdf_derive(mnemonic, strlen(mnemonic), GCRY_KDF_PBKDF2, GCRY_MD_SHA512, salt, strlen(salt), 2048UL, 64, seed);
 	if (err != 0) return 1;
         // Store in key_pair_t
+	memcpy(key_pair->seed, seed, SEED_LENGTH);
         memcpy(key_pair->key_priv, seed, PRIVKEY_LENGTH);
         memcpy(key_pair->chain_code, seed + PRIVKEY_LENGTH, CHAINCODE_LENGTH);
         return 0;
