@@ -64,6 +64,11 @@ void hex_to_bytes(const char *hex, uint8_t *bytes, size_t len) {
     }
 }
 
+void resize_convert_hex_to_bytes(const char *hex, uint8_t *bytes) {
+	size_t hex_halved = strlen(hex) / 2;
+	hex_to_bytes(hex, bytes, hex_halved);
+}
+
 // Helper: Print hex
 void print_as_hex(const char *label, const uint8_t *data, size_t len) {
     printf("%s: ", label);
@@ -120,6 +125,31 @@ int run_mnemonic_test() {
     	failures += test_seed_derivation(test_mnemonic3, test_passphrase3, expected_seed3);
 	return failures;
 }
+   
+// Test master key generation
+int test_master_key(const uint8_t *seed, size_t seed_len, const uint8_t *expected_priv, const uint8_t *expected_chain) {
+	// Prepare seed_pair from seed (split into key_priv and chain_code)
+    	key_pair_t seed_pair = {0};
+	memcpy(seed_pair.seed, seed, seed_len);
+    	memcpy(seed_pair.key_priv, seed, PRIVKEY_LENGTH);
+    	memcpy(seed_pair.chain_code, seed + PRIVKEY_LENGTH, CHAINCODE_LENGTH);
+    	
+	// Call generate_master_key function
+    	key_pair_t master = {0};
+    	if (generate_master_key(&seed_pair, seed_len, &master) != 0) {
+        	printf("generate_master_key failed\n");
+        	return 1;
+    	}
+    	int pass = memcmp(master.key_priv, expected_priv, PRIVKEY_LENGTH) == 0 &&
+               	   memcmp(master.chain_code, expected_chain, CHAINCODE_LENGTH) == 0;
+    	printf("Master key generation (using generate_master_key): %s\n", pass ? GREEN"[ PASS ]"RESET : RED"[ FAIL ]"RESET);
+        print_as_hex("Expected master priv", expected_priv, PRIVKEY_LENGTH);
+        print_as_hex("Got master priv", master.key_priv, PRIVKEY_LENGTH);
+        print_as_hex("Expected master chain", expected_chain, CHAINCODE_LENGTH);
+        print_as_hex("Got master chain", master.chain_code, CHAINCODE_LENGTH);
+    	printf("\n");
+	return !pass;
+}
 
 // Test child key derivation
 int test_child_derivation(const key_pair_t *master, const char *path, const uint8_t *expected_priv, const uint8_t *expected_chain) {
@@ -146,39 +176,12 @@ int test_child_derivation(const key_pair_t *master, const char *path, const uint
     int pass = memcmp(current.key_priv, exp_priv, PRIVKEY_LENGTH) == 0 &&
                memcmp(current.chain_code, exp_chain, CHAINCODE_LENGTH) == 0;
     printf("Child derivation (%s): %s\n", path, pass ? GREEN"[ PASS ]"RESET : RED"[ FAIL ]"RESET);
-    if (!pass) {
-        print_as_hex("Expected child priv", exp_priv, PRIVKEY_LENGTH);
-        print_as_hex("Got child priv", current.key_priv, PRIVKEY_LENGTH);
-        print_as_hex("Expected child chain", exp_chain, CHAINCODE_LENGTH);
-        print_as_hex("Got child chain", current.chain_code, CHAINCODE_LENGTH);
-    }
+    print_as_hex("Expected child priv", exp_priv, PRIVKEY_LENGTH);
+    print_as_hex("Got child priv", current.key_priv, PRIVKEY_LENGTH);
+    print_as_hex("Expected child chain", exp_chain, CHAINCODE_LENGTH);
+    print_as_hex("Got child chain", current.chain_code, CHAINCODE_LENGTH);
+    printf("\n");
     return !pass;
-}
-   
-// Test master key generation
-int test_master_key(const uint8_t *seed, size_t seed_len, const uint8_t *expected_priv, const uint8_t *expected_chain) {
-	// Prepare seed_pair from seed (split into key_priv and chain_code)
-    	key_pair_t seed_pair = {0};
-	memcpy(seed_pair.seed, seed, seed_len);
-    	memcpy(seed_pair.key_priv, seed, PRIVKEY_LENGTH);
-    	memcpy(seed_pair.chain_code, seed + PRIVKEY_LENGTH, CHAINCODE_LENGTH);
-    	
-	// Call your generate_master_key function
-    	key_pair_t master = {0};
-    	if (generate_master_key(&seed_pair, seed_len, &master) != 0) {
-        	printf("generate_master_key failed\n");
-        	return 1;
-    	}
-
-    	int pass = memcmp(master.key_priv, expected_priv, PRIVKEY_LENGTH) == 0 &&
-               	   memcmp(master.chain_code, expected_chain, CHAINCODE_LENGTH) == 0;
-    	printf("Master key generation (using generate_master_key): %s\n", pass ? GREEN"[ PASS ]"RESET : RED"[ FAIL ]"RESET);
-        print_as_hex("Expected master priv", expected_priv, PRIVKEY_LENGTH);
-        print_as_hex("Got master priv", master.key_priv, PRIVKEY_LENGTH);
-        print_as_hex("Expected master chain", expected_chain, CHAINCODE_LENGTH);
-        print_as_hex("Got master chain", master.chain_code, CHAINCODE_LENGTH);
-    	printf("\n");
-	return !pass;
 }
 
 int run_master_and_child_test() {
@@ -188,25 +191,30 @@ int run_master_and_child_test() {
         	const bip32_test_vector_t *tv = &test_vectors[v];
         	uint8_t seed[SEED_LENGTH];
         	size_t seed_len = strlen(tv->seed_hex) / 2;
-        	hex_to_bytes(tv->seed_hex, seed, seed_len);
+		resize_convert_hex_to_bytes(tv->seed_hex, seed);
 		uint8_t priv[PRIVKEY_LENGTH];
-		size_t priv_len = strlen(tv->master_priv_hex) / 2;
-		hex_to_bytes(tv->master_priv_hex, priv, priv_len);
+		resize_convert_hex_to_bytes(tv->master_priv_hex, priv);
 		uint8_t chain[CHAINCODE_LENGTH];
-		size_t chain_len = strlen(tv->master_chain_hex) / 2;
-		hex_to_bytes(tv->master_chain_hex, chain, chain_len);
-        	// Test master key
+		resize_convert_hex_to_bytes(tv->master_chain_hex, chain);
+
+		// Test master key 
+		// (important to pass in explicit seed len since seed sizes can vary 
+		// and with padding it could produce the wrong rsult if length not specified)
         	failures += test_master_key(seed, seed_len, priv, chain);
 
         	// Test child keys
         	key_pair_t master = {0};
-        	// Populate master from test (in production, derive from seed)
+        	// Populate master from test (using test vector's given private keys and chain code)
         	hex_to_bytes(tv->master_priv_hex, master.key_priv, PRIVKEY_LENGTH);
         	hex_to_bytes(tv->master_chain_hex, master.chain_code, CHAINCODE_LENGTH);
         	// Assume pubkey is derived; for test, focus on priv/chain
 
         	for (int c = 0; tv->paths[c]; c++) {
-            		failures += test_child_derivation(&master, tv->paths[c], (const uint8_t *)tv->child_priv_hex[c], (const uint8_t *)tv->child_chain_hex[c]);
+			uint8_t child_priv[PRIVKEY_LENGTH];
+			resize_convert_hex_to_bytes(tv->child_priv_hex[c], child_priv);
+			uint8_t child_chain[CHAINCODE_LENGTH];
+			resize_convert_hex_to_bytes(tv->child_chain_hex[c], child_chain);
+            		failures += test_child_derivation(&master, tv->paths[c], child_priv, child_chain);
         	}
     	}
 	return failures;
@@ -214,7 +222,7 @@ int run_master_and_child_test() {
 
 int main() {
 	int failures = 0; 
-//	failures += run_mnenomic_test();
+	failures += run_mnemonic_test();
 	failures += run_master_and_child_test(); 
     	printf("Total failures: %d\n", failures);
     	return failures > 0 ? 1 : 0;
