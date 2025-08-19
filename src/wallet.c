@@ -6,6 +6,8 @@
 #include "test_vectors.h"
 static const char *base58_chars = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 //static const char *secp256k1_params = "(ecc (p #FFFFFFFFFFFFFFFEFFFFFFFC2F#) (a #0#) (b #7#) (g #79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798# #483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8#) (n #FFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141#) (h #1#))";
+
+/*
 // Decompress compressed pub key to MPI x and y (for secp256k1)
 static int decompress_pubkey(const uint8_t *comp, gcry_mpi_t *x_out, gcry_mpi_t *y_out, gcry_mpi_t p) {
 	uint8_t prefix = comp[0];
@@ -53,7 +55,7 @@ static int compress_pubkey(gcry_mpi_t x, gcry_mpi_t y, uint8_t *comp_out) {
     	memcpy(comp_out + 1, x_bytes, 32);
     	return 0;
 }
-
+*/
 // Generate compressed pub key from priv key(secp256k1)
 int generate_public_key(const uint8_t *priv_key, uint8_t *pub_key_compressed) {
 	// Initialize ECC context for secp256k1
@@ -153,20 +155,20 @@ int generate_master_key(const key_pair_t *seed_pair, size_t seed_len, key_pair_t
 
 
 int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child) {
-printf("Starting derive_child_key for index: 0x%08x\n", index);	
+//printf("Starting derive_child_key for index: 0x%08x\n", index);	
 	uint8_t data[37]; // For HMAC input, 1 + 32 priv + 4 index or 33 pub + 4 index
 	size_t data_len;
 	int hardened = (index & 0x80000000) != 0; // 0: normal, 0x80000000: hardened
-printf("Hardened: %d\n", hardened);	
+//printf("Hardened: %d\n", hardened);	
 	if (hardened) {
 		data[0] = 0x00;
 		memcpy(data + 1, parent->key_priv, PRIVKEY_LENGTH);
 		data_len = 1 + PRIVKEY_LENGTH;
-print_as_hex("Hardened data (before index)", data, data_len);
+//print_as_hex("Hardened data (before index)", data, data_len);
 	} else {
 		memcpy(data, parent->key_pub_compressed, PUBKEY_LENGTH);
 		data_len = PUBKEY_LENGTH;
-print_as_hex("Normal data (before index)", data, data_len);
+//print_as_hex("Normal data (before index)", data, data_len);
 	}
 	// Append index (big-endian)
 	data[data_len + 0] = (index >> 24) & 0xFF;
@@ -174,8 +176,8 @@ print_as_hex("Normal data (before index)", data, data_len);
 	data[data_len + 2] = (index >> 8) & 0xFF;
 	data[data_len + 3] = index & 0xFF;
 	data_len += 4;
-print_as_hex("Full HMAC input data", data, data_len);	
-print_as_hex("Parent chain code (HMAC key)", parent->chain_code, CHAINCODE_LENGTH);
+//print_as_hex("Full HMAC input data", data, data_len);	
+//print_as_hex("Parent chain code (HMAC key)", parent->chain_code, CHAINCODE_LENGTH);
 	// Compute HMAC-SHA512
     	uint8_t hmac_output[64];
     	gcry_md_hd_t hmac;
@@ -185,20 +187,15 @@ print_as_hex("Parent chain code (HMAC key)", parent->chain_code, CHAINCODE_LENGT
     	gcry_md_write(hmac, data, data_len);
     	memcpy(hmac_output, gcry_md_read(hmac, GCRY_MD_SHA512), 64);
     	gcry_md_close(hmac);
-print_as_hex("HMAC output", hmac_output, 64);
+//print_as_hex("HMAC output", hmac_output, 64);
     	// IL = child offset (left 32 bytes) that's used to generate child private key, IR = child_chain_code (right 32 bytes)
     	uint8_t il[PRIVKEY_LENGTH];
     	memcpy(il, hmac_output, PRIVKEY_LENGTH);
-print_as_hex("IL (left 32 bytes)", il, PRIVKEY_LENGTH);
+//print_as_hex("IL (left 32 bytes)", il, PRIVKEY_LENGTH);
 	memset(child->chain_code, 0, CHAINCODE_LENGTH);
     	memcpy(child->chain_code, hmac_output + PRIVKEY_LENGTH, CHAINCODE_LENGTH);
 
-print_as_hex("Parent Private Key:", parent->key_priv, PRIVKEY_LENGTH);
-
-
-
-
-
+//print_as_hex("Parent Private Key:", parent->key_priv, PRIVKEY_LENGTH);
 
 	gcry_error_t err;
     	gcry_mpi_t parent_priv_mpi, il_mpi, n_mpi, child_priv_mpi;
@@ -238,16 +235,7 @@ print_as_hex("Parent Private Key:", parent->key_priv, PRIVKEY_LENGTH);
         	return 1;
     	}
     	gcry_mpi_release(child_priv_mpi);
-printf("gcry_mpi_print succeeded, written = %zu\n", written);
-
-/*	if (written > PRIVKEY_LENGTH) {
-        	return 1; // Ensure exactly 32 bytes
-    	}
-	if (written < 32) {
-		memmove(child->key_priv, child->key_priv + (PRIVKEY_LENGTH - written), written); // Right align
-printf("Padded child private key with %d leading zeros\n", PRIVKEY_LENGTH - written);
-	}
-*/
+//printf("gcry_mpi_print succeeded, written = %zu\n", written);
 
     	// Generate child public key
 	memset(child->key_pub_compressed, 0, PUBKEY_LENGTH);
@@ -262,7 +250,7 @@ printf("Padded child private key with %d leading zeros\n", PRIVKEY_LENGTH - writ
     	memcpy(child->key_pub_extended, child->key_pub_compressed, PUBKEY_LENGTH);
     	memcpy(child->key_pub_extended + PUBKEY_LENGTH, child->chain_code, CHAINCODE_LENGTH); 
 	child->key_index = index & 0xFF;
-printf("Child index set to: 0x%02x\n", child->key_index);    	
+//printf("Child index set to: 0x%02x\n", child->key_index);    	
 	return 0;
 }
 
