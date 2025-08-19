@@ -11,6 +11,7 @@ typedef struct {
 	const char *master_chain_hex;
 	const char *paths[5];
 	const char *child_priv_hex[5];
+	const char *child_pub_hex[5];
 	const char *child_chain_hex[5];
 } bip32_test_vector_t;
 

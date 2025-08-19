@@ -5,7 +5,7 @@
 #include <curl/curl.h>
 #include "test_vectors.h"
 static const char *base58_chars = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-static const char *secp256k1_params = "(ecc (p #FFFFFFFFFFFFFFFEFFFFFFFC2F#) (a #0#) (b #7#) (g #79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798# #483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8#) (n #FFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141#) (h #1#))";
+//static const char *secp256k1_params = "(ecc (p #FFFFFFFFFFFFFFFEFFFFFFFC2F#) (a #0#) (b #7#) (g #79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798# #483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8#) (n #FFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141#) (h #1#))";
 // Decompress compressed pub key to MPI x and y (for secp256k1)
 static int decompress_pubkey(const uint8_t *comp, gcry_mpi_t *x_out, gcry_mpi_t *y_out, gcry_mpi_t p) {
 	uint8_t prefix = comp[0];
@@ -134,20 +134,6 @@ int generate_master_key(const key_pair_t *seed_pair, size_t seed_len, key_pair_t
 	memcpy(hmac_output, gcry_md_read(hmac, GCRY_MD_SHA512), 64);
 	gcry_md_close(hmac);
 	
-	/*
-	// Validate private key
-    	gcry_mpi_t priv_mpi, n_mpi;
-    	gcry_mpi_scan(&priv_mpi, GCRYMPI_FMT_USG, hmac_output, PRIVKEY_LENGTH, NULL);
-    	gcry_mpi_scan(&n_mpi, GCRYMPI_FMT_HEX, "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141", 0, NULL);
-    	if (gcry_mpi_cmp_ui(priv_mpi, 0) == 0 || gcry_mpi_cmp(priv_mpi, n_mpi) >= 0) {
-        	gcry_mpi_release(priv_mpi);
-        	gcry_mpi_release(n_mpi);
-        	return 1;
-    	}
-    	gcry_mpi_release(priv_mpi);
-    	gcry_mpi_release(n_mpi);
-	*/
-
 	// Split output: left 32 bytes = master priv key, right 32 bytes = master chain code
 	memset(master, 0, sizeof(key_pair_t));
 	memcpy(master->key_priv, hmac_output, PRIVKEY_LENGTH);
@@ -167,16 +153,20 @@ int generate_master_key(const key_pair_t *seed_pair, size_t seed_len, key_pair_t
 
 
 int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child) {
+printf("Starting derive_child_key for index: 0x%08x\n", index);	
 	uint8_t data[37]; // For HMAC input, 1 + 32 priv + 4 index or 33 pub + 4 index
 	size_t data_len;
 	int hardened = (index & 0x80000000) != 0; // 0: normal, 0x80000000: hardened
+printf("Hardened: %d\n", hardened);	
 	if (hardened) {
 		data[0] = 0x00;
 		memcpy(data + 1, parent->key_priv, PRIVKEY_LENGTH);
 		data_len = 1 + PRIVKEY_LENGTH;
+print_as_hex("Hardened data (before index)", data, data_len);
 	} else {
 		memcpy(data, parent->key_pub_compressed, PUBKEY_LENGTH);
 		data_len = PUBKEY_LENGTH;
+print_as_hex("Normal data (before index)", data, data_len);
 	}
 	// Append index (big-endian)
 	data[data_len + 0] = (index >> 24) & 0xFF;
@@ -184,68 +174,96 @@ int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child
 	data[data_len + 2] = (index >> 8) & 0xFF;
 	data[data_len + 3] = index & 0xFF;
 	data_len += 4;
+print_as_hex("Full HMAC input data", data, data_len);	
+print_as_hex("Parent chain code (HMAC key)", parent->chain_code, CHAINCODE_LENGTH);
 	// Compute HMAC-SHA512
     	uint8_t hmac_output[64];
     	gcry_md_hd_t hmac;
     	if (gcry_md_open(&hmac, GCRY_MD_SHA512, GCRY_MD_FLAG_HMAC) != 0) return 1;
-	// Set key to parent chain code
+	// Set key to the parent chain code
     	gcry_md_setkey(hmac, parent->chain_code, CHAINCODE_LENGTH);
     	gcry_md_write(hmac, data, data_len);
     	memcpy(hmac_output, gcry_md_read(hmac, GCRY_MD_SHA512), 64);
     	gcry_md_close(hmac);
-
+print_as_hex("HMAC output", hmac_output, 64);
     	// IL = child offset (left 32 bytes) that's used to generate child private key, IR = child_chain_code (right 32 bytes)
     	uint8_t il[PRIVKEY_LENGTH];
     	memcpy(il, hmac_output, PRIVKEY_LENGTH);
+print_as_hex("IL (left 32 bytes)", il, PRIVKEY_LENGTH);
+	memset(child->chain_code, 0, CHAINCODE_LENGTH);
     	memcpy(child->chain_code, hmac_output + PRIVKEY_LENGTH, CHAINCODE_LENGTH);
 
-    	// Child private key = parent_private + IL mod n
+print_as_hex("Parent Private Key:", parent->key_priv, PRIVKEY_LENGTH);
+
+
+
+
+
+
+	gcry_error_t err;
     	gcry_mpi_t parent_priv_mpi, il_mpi, n_mpi, child_priv_mpi;
-    	gcry_mpi_scan(&parent_priv_mpi, GCRYMPI_FMT_USG, parent->key_priv, PRIVKEY_LENGTH, NULL);
-    	gcry_mpi_scan(&il_mpi, GCRYMPI_FMT_USG, il, PRIVKEY_LENGTH, NULL);
-    	gcry_mpi_scan(&n_mpi, GCRYMPI_FMT_HEX, "FFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141", 0, NULL);
+	err = gcry_mpi_scan(&parent_priv_mpi, GCRYMPI_FMT_USG, parent->key_priv, PRIVKEY_LENGTH, NULL);
+	if (err) {
+		fprintf(stderr, "gcry_mpi_scan failure for parent private key: %s\n", gcry_strerror(err));
+		return 1;
+	}
+	err = gcry_mpi_scan(&il_mpi, GCRYMPI_FMT_USG, il, PRIVKEY_LENGTH, NULL);
+	if (err) {
+		fprintf(stderr, "gcry_mpi_scan failure for IL: %s\n", gcry_strerror(err));
+		return 1;
+	}
+ 	err = gcry_mpi_scan(&n_mpi, GCRYMPI_FMT_HEX, "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141", 0, NULL);
+	if (err) { 
+		fprintf(stderr, "gcry_mpi_scan failure for n: %s\n", gcry_strerror(err));
+		return 1;
+	}
+
+//print_as_hex("Parent Pub:", parent->key_pub_compressed, PUBKEY_LENGTH);
+
     	child_priv_mpi = gcry_mpi_new(0);
+	if (!child_priv_mpi) return 1;
+
+	// The calculation for private key (child = parent priv + IL mod n)
     	gcry_mpi_addm(child_priv_mpi, parent_priv_mpi, il_mpi, n_mpi);
+
     	gcry_mpi_release(parent_priv_mpi);
     	gcry_mpi_release(il_mpi);
     	gcry_mpi_release(n_mpi);
 
-
-    	// Child public key: use libgcrypt ECC to compute parent_pub + (IL * G)
-    	// gcry_sexp_t curve, parent_pub_sexp, g_sexp, il_sexp, offset_point, child_pub_sexp;
-    	// gcry_sexp_build(&curve, NULL, secp256k1_params);
-    	
-	// Assume parent_pub_compressed is uncompressed for sexp; convert if needed
-    	// For simplicity, assume we have parent_pub as sexp; implement conversion
-	/// gcry_sexp_build(&parent_pub_sexp, NULL, "(public-key (ecc (curve secp256k1) (q #parent_pub_uncomp#)))");
-    	// gcry_sexp_build(&g_sexp, NULL, "(public-key (ecc (curve secp256k1) (q #04 79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798 483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8#)))");
-    	// gcry_pk_mul(&offset_point, g_sexp, il_sexp);
-    	// gcry_pk_add(&child_pub_sexp, parent_pub_sexp, offset_point);
-    	// Then extract compressed pubkey from child_pub_sexp
-
-    	// For now, skip full pubkey derivation if not needed; add as per your codebase
-
+	// Generate child private key
     	size_t written;
+	memset(child->key_priv, 0, PRIVKEY_LENGTH);
 	if (gcry_mpi_print(GCRYMPI_FMT_USG, child->key_priv, PRIVKEY_LENGTH, &written, child_priv_mpi) != 0) {
        		gcry_mpi_release(child_priv_mpi);
         	return 1;
     	}
     	gcry_mpi_release(child_priv_mpi);
-    	if (written != PRIVKEY_LENGTH) {
+printf("gcry_mpi_print succeeded, written = %zu\n", written);
+
+/*	if (written > PRIVKEY_LENGTH) {
         	return 1; // Ensure exactly 32 bytes
     	}
+	if (written < 32) {
+		memmove(child->key_priv, child->key_priv + (PRIVKEY_LENGTH - written), written); // Right align
+printf("Padded child private key with %d leading zeros\n", PRIVKEY_LENGTH - written);
+	}
+*/
+
     	// Generate child public key
+	memset(child->key_pub_compressed, 0, PUBKEY_LENGTH);
     	if (generate_public_key(child->key_priv, child->key_pub_compressed) != 0) {
         	return 1;
     	}
 	// Update extended keys
+	memset(child->key_priv_extended, 0, PRIVKEY_LENGTH + CHAINCODE_LENGTH);
     	memcpy(child->key_priv_extended, child->key_priv, PRIVKEY_LENGTH);
     	memcpy(child->key_priv_extended + PRIVKEY_LENGTH, child->chain_code, CHAINCODE_LENGTH);
+	memset(child->key_pub_extended, 0, PUBKEY_LENGTH + CHAINCODE_LENGTH);
     	memcpy(child->key_pub_extended, child->key_pub_compressed, PUBKEY_LENGTH);
-    	memcpy(child->key_pub_extended + PUBKEY_LENGTH, child->chain_code, CHAINCODE_LENGTH);
-    	child->key_index = index & 0xFF;
-
-    	return 0;
+    	memcpy(child->key_pub_extended + PUBKEY_LENGTH, child->chain_code, CHAINCODE_LENGTH); 
+	child->key_index = index & 0xFF;
+printf("Child index set to: 0x%02x\n", child->key_index);    	
+	return 0;
 }
 
 char *base58_encode(const uint8_t *data, size_t data_len) {

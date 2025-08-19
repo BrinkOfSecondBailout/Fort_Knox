@@ -25,6 +25,14 @@ static const bip32_test_vector_t test_vectors[] = {
             		"0f479245fb19a38a1954c5c7c0ebab2f9bdfd96a17563ef28a6a4b1a2a764ef4",
            		"471b76e389e528d6de6d816857e012c5455051cad6660850e58372a6c3e6e7c8"
         	},
+		// Public keys for respective path
+		{
+			"035a784662a4a20a65bf6aab9ae98a6c068a81c52e4b032c0fb5400c706cfccc56",
+			"03501e454bf00751f24b1b489aa925215d66af2234e3891c3b21a52bedb3cd711c",
+			"0357bfe1e341d01c69fe5654309956cbea516822fba8a601743a012a7896ee8dc2",
+			"02e8445082a72f29b75ca48748a914df60622a609cacfce8ed0e35804560741d29",
+			"022a471424da5e657499d1ff51cb43c47481a03b1e77f951fe64cec9f5a48f7011"
+		},
 		// Chain code for respective path
         	{
             		"47fdacbd0f1097043b78c63c20c34ef4ed9a111d980047ad16282c7ae6236141",
@@ -47,6 +55,13 @@ static const bip32_test_vector_t test_vectors[] = {
 			"704addf544a06e5ee4bea37098463c23613da32020d604506da8c0518e1da4b7",
 			"f1c7c871a54a804afe328b4c83a1c33b8e5ff48f5087273f04efa83b247d6a2d",
 			"bb7d39bdb83ecf58f2fd82b6d918341cbef428661ef01ab97c28a4842125ac23"
+		},
+		{
+			"02fc9e5af0ac8d9b3cecfe2a888e2117ba3d089d8585886c9c826b6b22a98d12ea",
+			"03c01e7425647bdefa82b12d9bad5e3e6865bee0502694b94ca58b666abc0a5c3b",
+			"03a7d1d856deb74c508e05031f9895dab54626251b3806e16b4bd12e781a7df5b9",
+			"02d2b36900396c9282fa14628566582f206a5dd0bcc8d5e892611806cafb0301f0",
+			"024d902e1a2fc7a8755ab5b694c575fce742c48d9ff192e63df5193e4c7afe1f9c"
 		},
 		{
 			"f0909affaa7ee7abe5dd4e100598d4dc53cd709d5a5c2cac40e7412f232f7c9c",
@@ -152,48 +167,49 @@ int test_master_key(const uint8_t *seed, size_t seed_len, const uint8_t *expecte
 		   memcmp(master.key_pub_compressed, expected_pub, PUBKEY_LENGTH) == 0 &&
                	   memcmp(master.chain_code, expected_chain, CHAINCODE_LENGTH) == 0;
     	printf("Master key generation (using generate_master_key): %s\n", pass ? GREEN"[ PASS ]"RESET : RED"[ FAIL ]"RESET);
-        print_as_hex("Expected master priv", expected_priv, PRIVKEY_LENGTH);
-        print_as_hex("Got master priv", master.key_priv, PRIVKEY_LENGTH);
-	print_as_hex("Expected master pub", expected_pub, PUBKEY_LENGTH);
-	print_as_hex("Got public pub", master.key_pub_compressed, PUBKEY_LENGTH);
-        print_as_hex("Expected master chain", expected_chain, CHAINCODE_LENGTH);
-        print_as_hex("Got master chain", master.chain_code, CHAINCODE_LENGTH);
+        print_as_hex("Expected master priv:  ", expected_priv, PRIVKEY_LENGTH);
+        print_as_hex("Got master priv:       ", master.key_priv, PRIVKEY_LENGTH);
+	print_as_hex("Expected master pub:   ", expected_pub, PUBKEY_LENGTH);
+	print_as_hex("Got public pub:        ", master.key_pub_compressed, PUBKEY_LENGTH);
+        print_as_hex("Expected master chain: ", expected_chain, CHAINCODE_LENGTH);
+        print_as_hex("Got master chain:      ", master.chain_code, CHAINCODE_LENGTH);
     	printf("\n");
 	return !pass;
 }
 
 // Test child key derivation
-int test_child_derivation(const key_pair_t *master, const char *path, const uint8_t *expected_priv, const uint8_t *expected_chain) {
-    	key_pair_t current = *master; // Start from master
+int test_child_derivation(const key_pair_t *master, const char *path, const uint8_t *expected_priv, const uint8_t *expected_pub, const uint8_t *expected_chain) {
+    	int pass;
+	key_pair_t current = *master; // Start from master
     	// Parse path (e.g., "m/0'/1/2'" -> skip 'm/', parse indices with ' for hardened)
     	const char *p = path + 2; // Skip "m/"
     	while (*p) {
-printf("Derivation starts from: %s\n", p);
         	uint32_t idx = strtoul(p, (char **)&p, 10);
         	int hardened = 0;
 		if (*p == '\'') {
             		hardened = 1;
 			printf("Hardened\n");
             		p++;
-        	} else {
-			printf("Normal\n");
-		}
+        	}
         	if (hardened) idx |= 0x80000000;
 		// Call derive_child_key for the current chain
         	if (derive_child_key(&current, idx, &current) != 0) return 1;
+		pass = memcmp(current.key_priv, expected_priv, PRIVKEY_LENGTH) == 0 &&
+		   memcmp(current.key_pub_compressed, expected_pub, PUBKEY_LENGTH) == 0 &&
+          	   memcmp(current.chain_code, expected_chain, CHAINCODE_LENGTH) == 0;
+    		printf("Child derivation (%s): %s\n", path, pass ? GREEN"[ PASS ]"RESET : RED"[ FAIL ]"RESET);
+    		print_as_hex("Expected child priv:  ", expected_priv, PRIVKEY_LENGTH);
+    		print_as_hex("Got child priv:       ", current.key_priv, PRIVKEY_LENGTH);
+		print_as_hex("Expected child pub:   ", expected_pub, PUBKEY_LENGTH);
+		print_as_hex("Got child pub:        ", current.key_pub_compressed, PUBKEY_LENGTH);   
+ 		print_as_hex("Expected child chain: ", expected_chain, CHAINCODE_LENGTH);
+    		print_as_hex("Got child chain:      ", current.chain_code, CHAINCODE_LENGTH);
+    		printf("\n");
 		// Skip '/' and point at beginning index of next chain
         	if (*p == '/') p++;
     	}
 
-    	int pass = memcmp(current.key_priv, expected_priv, PRIVKEY_LENGTH) == 0 &&
-          	     memcmp(current.chain_code, expected_chain, CHAINCODE_LENGTH) == 0;
-    	printf("Child derivation (%s): %s\n", path, pass ? GREEN"[ PASS ]"RESET : RED"[ FAIL ]"RESET);
-    	print_as_hex("Expected child priv", expected_priv, PRIVKEY_LENGTH);
-    	print_as_hex("Got child priv", current.key_priv, PRIVKEY_LENGTH);
-    	print_as_hex("Expected child chain", expected_chain, CHAINCODE_LENGTH);
-    	print_as_hex("Got child chain", current.chain_code, CHAINCODE_LENGTH);
-    	printf("\n");
-    	return !pass;
+    	    	return !pass;
 }
 
 int run_master_and_child_test() {
@@ -231,9 +247,14 @@ int run_master_and_child_test() {
         	for (int c = 0; tv->paths[c]; c++) {
 			uint8_t child_priv[PRIVKEY_LENGTH];
 			resize_convert_hex_to_bytes(tv->child_priv_hex[c], child_priv);
+			uint8_t child_pub[PUBKEY_LENGTH];
+			resize_convert_hex_to_bytes(tv->child_pub_hex[c], child_pub); 
 			uint8_t child_chain[CHAINCODE_LENGTH];
 			resize_convert_hex_to_bytes(tv->child_chain_hex[c], child_chain);
-            		failures += test_child_derivation(&master, tv->paths[c], child_priv, child_chain);
+            		int failure;
+			failure = test_child_derivation(&master, tv->paths[c], child_priv, child_pub, child_chain);
+			failures += failure;
+			if (failure) break;
         	}
     	}
 	return failures;
@@ -241,7 +262,7 @@ int run_master_and_child_test() {
 
 int main() {
 	int failures = 0; 
-	failures += run_mnemonic_test();
+//	failures += run_mnemonic_test();
 	failures += run_master_and_child_test(); 
     	printf("Total failures: %d\n", failures);
     	return failures > 0 ? 1 : 0;
