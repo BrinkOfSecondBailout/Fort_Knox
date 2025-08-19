@@ -63,7 +63,5 @@ int mnemonic_to_seed(const char *mnemonic, const char *passphrase, key_pair_t *k
 	if (err != 0) return 1;
         // Store in key_pair_t
 	memcpy(key_pair->seed, seed, SEED_LENGTH);
-        memcpy(key_pair->key_priv, seed, PRIVKEY_LENGTH);
-        memcpy(key_pair->chain_code, seed + PRIVKEY_LENGTH, CHAINCODE_LENGTH);
         return 0;
 }

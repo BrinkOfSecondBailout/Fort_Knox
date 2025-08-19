@@ -104,8 +104,7 @@ int test_seed_derivation(const char *mnemonic, const char *passphrase, const uin
     	}
     	// Reconstruct the 64-byte seed from key_pair (key_priv + chain_code)
     	uint8_t computed_seed[64];
-    	memcpy(computed_seed, key_pair.key_priv, PRIVKEY_LENGTH);
-    	memcpy(computed_seed + PRIVKEY_LENGTH, key_pair.chain_code, CHAINCODE_LENGTH);
+    	memcpy(computed_seed, key_pair.seed, SEED_LENGTH);
 
     	// Compare with expected
 	int pass = memcmp(computed_seed, expected_seed, 64) == 0;
