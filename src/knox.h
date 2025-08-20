@@ -4,6 +4,8 @@
 #define KNOX_H
 #include "wallet.h"
 
+#define INITIAL_CHILD_CAPACITY 20
+
 typedef unsigned int int32;
 
 typedef int32 (*Callback)();

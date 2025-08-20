@@ -37,12 +37,60 @@ void print_logo() {
 	return;
 }
 
-void init_user(User *user) {
-	zero(user->seed, SEED_LENGTH);
+int init_user(User *user) {
+	user = gcry_malloc_secure(sizeof(User));
+	if (!user) return -1;
+	zero((void *)user, sizeof(User));
+	zero((void *)user->seed, SEED_LENGTH);
 	user->master_key = NULL;
-	user->child_keys = NULL;
+	user->master_key = gcry_malloc_secure(sizeof(key_pair_t));
+	if (!user->master_key) {
+		fprintf(stderr, "Init User() allocation failure\n");
+		return -2;
+	}
+	zero((void *)user->master_key, sizeof(key_pair_t));
 	user->child_key_count = 0;
-	user->child_key_capacity = 0;
+	user->child_key_capacity = INITIAL_CHILD_CAPACITY;
+	user->child_keys = gcry_calloc_secure(INITIAL_CHILD_CAPACITY, sizeof(key_pair_t *));
+	if (!user->child_keys) {
+		if (user->master_key) {
+			zero((void *)user->master_key, sizeof(key_pair_t));
+			gcry_free(user->master_key);
+			user->master_key = NULL;
+		}
+		zero((void *)user->seed, SEED_LENGTH);
+		fprintf(stderr, "Init User() allocation failure\n");
+		return -3;
+	}
+	for (size_t i = 0; i < INITIAL_CHILD_CAPACITY; i++) {
+		user->child_keys[i] = NULL;
+	}
+	return 0;
+}
+
+void free_user(User *user) {
+	if (!user) return;
+	if (user->master_key) {
+		zero((void *)user->master_key, sizeof(key_pair_t));
+		gcry_free(user->master_key);
+		user->master_key = NULL;
+	}
+	if (user->child_keys) {
+		for (size_t i = 0; i < user->child_key_count; i++) {
+			if (user->child_keys[i]) {
+				zero((void *)user->child_keys[i], sizeof(key_pair_t));
+				gcry_free(user->child_keys[i]);
+				user->child_keys[i] = NULL;
+			}
+		}
+		zero((void *)user->child_keys, user->child_key_capacity * sizeof (key_pair_t *));
+		gcry_free(user->child_keys);
+		user->child_keys = NULL;
+	}
+	zero((void *)user->seed, SEED_LENGTH);
+	user->child_key_count = 0;
+	user->child_key_count = 0;
+	gcry_free(user);
 }
 
 void print_commands() {
@@ -76,16 +124,16 @@ int32 exit_handle() {
 
 int has_wallet() {
 	if (user.seed[0] != 0) return 1;
-	printf("No wallet available for this command. Please generate a new wallet or recover your existing one\n"
+	printf("No wallet available for this command. Please generate a new wallet or recover your existing one.\n"
 		"Type 'new' or 'recover' to begin\n");
 	return 0; 
 }
 
 int32 new_handle() {
-	char cmd[255];
+	char cmd[256];
 	if (has_wallet()) {
 		while (1) {
-			printf("Seems like you already have a wallet set in this current session\n"
+			printf("You already have a wallet set in this current account.\n"
 				"Would you like to generate a new one anyways and overwrite the existing one?\n");
 			zero(cmd, sizeof(cmd));
 			if (!fgets(cmd, sizeof(cmd), stdin)) {
@@ -104,6 +152,7 @@ int32 new_handle() {
 				printf("Got it, we'll keep the existing wallet for now.\n");
 				return 1;
 			} else if (strcmp(cmd, "yes") == 0) {
+				init_user(&user);
 				break;
 			}
 		}
@@ -186,52 +235,173 @@ int32 new_handle() {
 			"you will see a completely different wallet, not the one you're about to use to send funds to\n"RESET, nword);
 		}	
 	}
+	if (generate_master_key(user.seed, SEED_LENGTH, user.master_key) != 0) {
+		fprintf(stderr, "Error deriving master key from seed\n");
+		return 1;
+	}
+	printf("Master key successfully generated and saved.\n");
 	return 0;
 }
 
 int32 recover_handle() {
-	
-	return 0;
+	char passphrase[256];
+	char mnemonic[256];
+	char cmd[256];
+	int nword;
+	if (has_wallet()) {
+		while (1) {
+			printf("You already have a wallet set in this account\n"
+				"Would you like to recover a new one anyways and overwrite the existing one?\n> ");
+			zero(cmd, sizeof(cmd));
+			if (!fgets(cmd, sizeof(cmd), stdin)) {
+				fprintf(stderr, "fgets() failure\n");
+			}
+			cmd[strlen(cmd)] = '\0';
+			int i = 0;
+			while (cmd[i] != '\0') {
+				cmd[i] = tolower((unsigned char)cmd[i]);
+				i++;
+			}
+			if (strcmp(cmd, "exit") == 0) exit_handle();
+			if ((strcmp(cmd, "yes") != 0) && (strcmp(cmd, "no") != 0)) {
+				printf("Invalid answer, must type 'yes' or 'no'.\n");
+			} else if (strcmp(cmd, "no") == 0) {
+				printf("Got it, we'll keep the existing wallet for now.\n");
+				return 1;
+			} else if (strcmp(cmd, "yes") == 0) {
+				init_user(&user);
+				break;
+			}
+		}
+	}
+	printf("Highly recommended that you turn your internet off for this part\n");
+	while (1) {
+		printf("How many words are your mnemonic seed phrase?\n"
+			"Enter one of these numbers (12, 15, 18, 21, 24)\n"
+			"> ");
+		zero(cmd, sizeof(cmd));
+		if (!fgets(cmd, sizeof(cmd), stdin)) {
+			fprintf(stderr, "fgets() failure\n");
+		}
+		cmd[strlen(cmd)] = '\0';
+		int i = 0;
+		while (cmd[i] != '\0') {
+			cmd[i] = tolower((unsigned char)cmd[i]);
+			i++;
+		}
+		if (strcmp(cmd, "exit") == 0) exit_handle();
+		nword = atoi(cmd);
+		if (nword != 12 && nword != 15 && nword != 18 && nword != 21 && nword != 24) {
+			fprintf(stderr, "\nPlease select a valid number - only 12, 15, 18, 21, 24 allowed\n");
+		} else {
+			break;
+		}
+	}
+	while (1) {
+		printf("Got it! You have a %d words mnemonic seed phrase.\n"
+		"Next, enter your %d words mnemonic seed phrase, each separated by a single space.\n"
+		"Note: all words entered will automatically be converted to lower case.\n"
+		"Example: habit eager gallery cabbage interest vacuum unaware wait invest gap game lab\n> ", nword, nword);
+		zero(mnemonic, sizeof(mnemonic));
+		if (!fgets(mnemonic, sizeof(mnemonic), stdin)) {
+			fprintf(stderr, "fgets() failure\n");
+		}
+		mnemonic[strlen(mnemonic)] = '\0';
+		int i = 0;
+		while (mnemonic[i] != '\0') {
+			mnemonic[i] = tolower((unsigned char)mnemonic[i]);
+			i++;
+		}
+		size_t mnemonic_len = strlen(mnemonic);
+		if (mnemonic_len != nword) {
+			fprintf(stderr, "Mnemonic seed phrase word count not matching, expected %d and got %d.\nTry again.\n", nword, mnemonic_len);
+		} else {
+			break;
+		}
+	}
+	printf("Got it! Clear your terminal to prevent hackers from potentially screen capturing your seed!\n");
+	while (1) {
+		printf("Do you have a passphrase to add to the mnemonic seed?\n"
+			"Keep in mind a completely different wallet will appear based on whether a passphrase was used or not.\n"
+			"Type 'yes' or 'no'\n> ");
+		zero(cmd, sizeof(cmd));
+		zero(passphrase, sizeof(passphrase));
+		if (!fgets(cmd, sizeof(cmd), stdin)) {
+			fprintf(stderr, "fgets() failure\n");
+		}
+		cmd[strlen(cmd) - 1] = '\0';
+		int i = 0;
+		while (cmd[i] != '\0') {
+			cmd[i] = tolower((unsigned char)cmd[i]);
+			i++;
+		}
+		if (strcmp(cmd, "exit") == 0) exit_handle();
+		if ((strcmp(cmd, "yes") != 0) && (strcmp(cmd, "no") != 0)) {
+			printf("\nInvalid answer, must type 'yes' or 'no'\n");
+		} else if (strcmp(cmd, "yes") == 0) {
+			printf("\nGot it! Let's add a passphrase, a few critical details here:\n"
+				RED"Remember that funds sent to this wallet will always need this passphrase to be recovered!\n"RESET
+				"Think of this passphrase as the %dth word of your mnemonic seed, you MUST have it\n"
+				"Enter your passphrase (*case sensitive*) (up to 256 characters):\n"
+				"> ", nword + 1);
+			if (!fgets(passphrase, sizeof(passphrase), stdin)) {
+				fprintf(stderr, "fgets() failure\n");
+				}
+				passphrase[strlen(passphrase) - 1] = '\0';
+				printf("\nPassphrase successfully included..");
+				break;
+		} else if (strcmp(cmd, "no") == 0) {
+			printf("\nGot it! Your passphrase is left blank\n"
+				"You will only need to write down your seed words once it's generated\n");
+			passphrase[0] = '\0';
+			break;
+		}
+
+	}		
+}
+
+
+return 0;
 }
 
 int32 balance_handle() {
-	if (!has_wallet()) return 1;
-	curl_global_init(CURL_GLOBAL_DEFAULT);
+if (!has_wallet()) return 1;
+curl_global_init(CURL_GLOBAL_DEFAULT);
 
-	curl_global_cleanup();
-	return 0;
+curl_global_cleanup();
+return 0;
 }
 
 int32 receive_handle() {
-	if (!has_wallet()) return 1;
-	return 0;
+if (!has_wallet()) return 1;
+return 0;
 }
 
 int32 send_handle() {
-	if (!has_wallet()) return 1;
-	return 0;
+if (!has_wallet()) return 1;
+return 0;
 }
 
 int32 help_handle() {
-	return 0;
+return 0;
 }
 
 int32 menu_handle() {
-	print_commands();
-	return 0;
+print_commands();
+return 0;
 }
 
 Callback get_command(const char *cmd) {
-	if (!cmd || !cmd[0]) {
-		return NULL;
-	}
-	static const size_t len = sizeof(c_handlers) / sizeof(c_handlers[0]);
-	for (size_t i = 0; i < len; i++) {
-		if (c_handlers[i].command_name && strcmp((char *)cmd, (char *)c_handlers[i].command_name) == 0) {
-			return c_handlers[i].callback_function;
-		}
-	}
+if (!cmd || !cmd[0]) {
 	return NULL;
+}
+static const size_t len = sizeof(c_handlers) / sizeof(c_handlers[0]);
+for (size_t i = 0; i < len; i++) {
+	if (c_handlers[i].command_name && strcmp((char *)cmd, (char *)c_handlers[i].command_name) == 0) {
+		return c_handlers[i].callback_function;
+	}
+}
+return NULL;
 }
 
 void main_loop() {
@@ -259,9 +429,14 @@ void main_loop() {
 
 int main() {
 	print_logo();
-	init_user(&user);
 	init_gcrypt();
+	int result = init_user(&user);
+	if (result != 0) {
+		fprintf(stderr, "User secured allocation and setup failed.\n");
+		return 1;
+	}
 	print_commands();
 	main_loop();
+	free_user(&user);
 	return 0;
 }
