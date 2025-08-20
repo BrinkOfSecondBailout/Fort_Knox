@@ -82,11 +82,37 @@ int has_wallet() {
 }
 
 int32 new_handle() {
+	char cmd[255];
+	if (has_wallet()) {
+		while (1) {
+			printf("Seems like you already have a wallet set in this current session\n"
+				"Would you like to generate a new one anyways and overwrite the existing one?\n");
+			zero(cmd, sizeof(cmd));
+			if (!fgets(cmd, sizeof(cmd), stdin)) {
+				fprintf(stderr, "fgets() failure\n");
+			}
+			cmd[strlen(cmd)] = '\0';
+			int i = 0;
+			while (cmd[i] != '\0') {
+				cmd[i] = tolower((unsigned char)cmd[i]);
+				i++;
+			}
+			if (strcmp(cmd, "exit") == 0) exit_handle();
+			if ((strcmp(cmd, "yes") != 0) && (strcmp(cmd, "no") != 0)) {
+				printf("Invalid answer, must type 'yes' or 'no'.\n");
+			} else if (strcmp(cmd, "no") == 0) {
+				printf("Got it, we'll keep the existing wallet for now.\n");
+				return 1;
+			} else if (strcmp(cmd, "yes") == 0) {
+				break;
+			}
+		}
+	}
 	printf("Generating a standard BIP44 Bitcoin wallet...\n"
-		"If this program is running locally, strongly recommended that you disconnect from the internet for extra security\n");
+		"If this program is running locally, strongly recommended "
+		"that you disconnect from the internet for extra security\n");
 	char mnemonic[256];
 	char passphrase[256];
-	char cmd[255];
 	int nword;
 	while (1) {
 		zero(cmd, sizeof(cmd));
@@ -120,7 +146,7 @@ int32 new_handle() {
 		}
 		if (strcmp(cmd, "exit") == 0) exit_handle();
 		if ((strcmp(cmd, "yes") != 0) && (strcmp(cmd, "no") != 0)) {
-			fprintf(stderr, "\nInvalid answer, must type 'yes' or 'no'\n");
+			printf("\nInvalid answer, must type 'yes' or 'no'\n");
 		} else if (strcmp(cmd, "yes") == 0) {
 			printf("\nGot it! Let's add a passphrase, a few critical details here:\n"
 				RED"Remember that funds sent to this wallet will always need this passphrase to be recovered!\n"RESET
@@ -148,8 +174,9 @@ int32 new_handle() {
 			"\n\n"
 			RED"IMPORTANT:"RESET 
 			" Please write these words down very carefully on a piece of paper\n"
-			"Do NOT type or save these words on any electronic devices\n"
-			" Losing these words or having them stolen = losing all of your bitcoin\n", mnemonic);
+			"Do NOT type or save them on any electronic devices\n"
+			"I suggest clearing the terminal immediately after writing the words down\n"
+			"Losing these words or having them stolen = losing all of your bitcoin\n", mnemonic);
 		if (passphrase[0]) {
 			printf(RED"ALSO IMPORTANT:"RESET 
 			" Those are ONLY the %d mnemonic seed words\n"
@@ -216,6 +243,11 @@ void main_loop() {
 			fprintf(stderr, "fgets() failure\n");
 		}
 		cmd[strlen(cmd) - 1] = '\0';
+		int i = 0;
+		while (cmd[i] != '\0') {
+			cmd[i] = tolower((unsigned char)cmd[i]);
+			i++;
+		}
 		Callback cb = get_command(cmd);
 		if (!cb) {
 			printf("Invalid command\n");
