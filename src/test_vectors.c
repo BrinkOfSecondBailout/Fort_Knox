@@ -226,10 +226,78 @@ int run_master_and_child_test() {
 	return failures;
 }
 
+int test_mnemonic_recovery(const char *mnemonic, const char *passphrase, uint8_t *recovered_seed, key_pair_t *recovered_master) {
+	int word_count = 0;
+	const char *p = mnemonic;
+	while (*p) {
+		if (*p == ' ') word_count++;
+		p++;
+	}
+	word_count++;
+	int result = mnemonic_to_seed(mnemonic, passphrase, recovered_seed);
+	if (result != 0) {
+		fprintf(stderr, "mnemonic_to_seed() recovery failure\n");
+		return 1;
+	}
+	result = generate_master_key(recovered_seed, SEED_LENGTH, recovered_master);
+	if (result != 0) {
+		fprintf(stderr, "generate_master_key() recovery failure\n");
+	}
+	return 0;
+}
+
+int test_mnemonic_generation(int nword, char *mnemonic, const char *passphrase, uint8_t *generated_seed, key_pair_t *generated_master) {
+	int result = generate_mnemonic(nword, passphrase, mnemonic, 256, generated_seed);
+	if (result != 0) {
+		fprintf(stderr, "generate_mnemonic() generation failure\n");
+		return 1;
+	}
+	result = generate_master_key(generated_seed, SEED_LENGTH, generated_master);
+	if (result != 0) {
+		fprintf(stderr, "generate_master_key() generation failure\n");
+		return 1;
+	}
+	printf("Mnemonic: %s\n", mnemonic);
+	return 0;
+}
+
+int mnemonic_recovery_test(int nword, const char *passphrase) {
+	int failures = 0;
+	uint8_t generated_seed[SEED_LENGTH];
+	key_pair_t generated_master;
+	uint8_t recovered_seed[SEED_LENGTH];
+	key_pair_t recovered_master;
+	char mnemonic[256];
+	failures += test_mnemonic_generation(nword, mnemonic, passphrase, generated_seed, &generated_master);
+	failures += test_mnemonic_recovery(mnemonic, passphrase, recovered_seed, &recovered_master);
+	int pass = memcmp(generated_seed, recovered_seed, SEED_LENGTH) == 0 &&
+		   memcmp(generated_master.key_priv, recovered_master.key_priv, PRIVKEY_LENGTH) == 0;
+	
+    	printf("Mnemonic generation and recovery test:\n%s\n", pass ? GREEN"[ PASS ]"RESET : RED"[ FAIL ]"RESET);
+    	print_bytes_as_hex("Generated seed:       ", generated_seed, SEED_LENGTH);
+    	print_bytes_as_hex("Recovered seed:       ", recovered_seed, SEED_LENGTH);
+	print_bytes_as_hex("Generated master key: ", generated_master.key_priv, PRIVKEY_LENGTH);
+	print_bytes_as_hex("Recovered master key: ", recovered_master.key_priv, PRIVKEY_LENGTH);   
+	printf("\n");
+	return !pass;
+}
+
+int run_mnemonic_recovery_test() {
+	int failures = 0;
+	const char *passphrase = "RandomSTUFF";
+	failures += mnemonic_recovery_test(24, passphrase);
+	passphrase = "Superlongcrazypassphrase";
+	failures += mnemonic_recovery_test(18, passphrase);
+	passphrase = "";
+	failures += mnemonic_recovery_test(21, passphrase);
+	return failures;
+}
+ 
 int main() {
 	int failures = 0; 
 	failures += run_mnemonic_test();
 	failures += run_master_and_child_test(); 
+	failures += run_mnemonic_recovery_test();
     	printf("Total failures: %d\n", failures);
     	return failures > 0 ? 1 : 0;
 }

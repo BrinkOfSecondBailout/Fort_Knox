@@ -87,20 +87,6 @@ void free_user(User *user) {
 	gcry_free(user);
 }
 
-// Print a hash of the seed, for testing purposes
-void verify_seed(const uint8_t *seed, size_t len) {
-	unsigned char hash[32];
-	gcry_md_hash_buffer(GCRY_MD_SHA256, hash, seed, len);
-	print_bytes_as_hex("Seed (Hashed SHA-256): ", hash, 32);
-}
-
-// Print a hash of the master private key, for testing purposes
-void verify_master_priv_key(const uint8_t *priv, size_t len) {
-	unsigned char hash[32];
-	gcry_md_hash_buffer(GCRY_MD_SHA256, hash, priv, len);
-	print_bytes_as_hex("Master Private Key (Hashed SHA-256): ", hash, 32);
-}
-
 void print_commands() {
 	fprintf(stdout, "Welcome bitcoiner! What is your command?\n"
 	"- new				Create a new bitcoin wallet\n"
@@ -221,7 +207,7 @@ int32 new_handle() {
 		}
 	}			
 	int result;
-	result = generate_mnemonic(nword, passphrase, mnemonic, sizeof(mnemonic), user.seed);
+	result = generate_mnemonic(nword, passphrase, mnemonic, 256, user.seed);
 	if (result != 0) {
 		fprintf(stderr, "Failure generate wallet seed.\n");
 		return 1;
