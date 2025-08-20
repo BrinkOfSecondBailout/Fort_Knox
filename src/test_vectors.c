@@ -95,17 +95,13 @@ void print_as_hex(const char *label, const uint8_t *data, size_t len) {
 
 // Test seed derivation (BIP-39)
 int test_seed_derivation(const char *mnemonic, const char *passphrase, const uint8_t *expected_seed) {
-	key_pair_t key_pair = {0}; // Initialize empty key_pair_t
+	uint8_t computed_seed[64] = {0}; // Initialize empty key_pair_t
 
     	// Call your mnemonic_to_seed function
-    	if (mnemonic_to_seed(mnemonic, passphrase, &key_pair) != 0) {
+    	if (mnemonic_to_seed(mnemonic, passphrase, computed_seed) != 0) {
         	printf("mnemonic_to_seed failed\n");
         	return 1;
     	}
-    	// Reconstruct the 64-byte seed from key_pair (key_priv + chain_code)
-    	uint8_t computed_seed[64];
-    	memcpy(computed_seed, key_pair.seed, SEED_LENGTH);
-
     	// Compare with expected
 	int pass = memcmp(computed_seed, expected_seed, 64) == 0;
     	printf("Seed derivation (using mnemonic_to_seed): %s\n", pass ? GREEN"[ PASS ]"RESET : RED"[ FAIL] "RESET);	
@@ -148,15 +144,9 @@ int run_mnemonic_test() {
    
 // Test master key generation
 int test_master_key(const uint8_t *seed, size_t seed_len, const uint8_t *expected_priv, const uint8_t *expected_pub, const uint8_t *expected_chain) {
-	// Prepare seed_pair from seed (split into key_priv and chain_code)
-    	key_pair_t seed_pair = {0};
-	memcpy(seed_pair.seed, seed, seed_len);
-    	memcpy(seed_pair.key_priv, seed, PRIVKEY_LENGTH);
-    	memcpy(seed_pair.chain_code, seed + PRIVKEY_LENGTH, CHAINCODE_LENGTH);
-    	
 	// Call generate_master_key function
     	key_pair_t master = {0};
-    	if (generate_master_key(&seed_pair, seed_len, &master) != 0) {
+    	if (generate_master_key(seed, seed_len, &master) != 0) {
         	printf("generate_master_key failed\n");
         	return 1;
     	}

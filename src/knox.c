@@ -7,6 +7,8 @@
 #include "mnemonic.h"
 #include "curl/curl.h"
 
+static User user;
+
 void zero(void *buf, size_t size) {
 	memset(buf, 0, size);
 	return;
@@ -26,7 +28,7 @@ void print_logo() {
 	FILE *logo = fopen("logo.txt", "r");
 	char buffer[1024];
 	while (fgets(buffer, sizeof(buffer), logo)) {
-		printf(CYAN"%s", buffer);
+		printf(BLUE"%s", buffer);
 		fflush(stdout);
 		usleep(100000);
 	}
@@ -35,15 +37,21 @@ void print_logo() {
 	return;
 }
 
+void init_user(User *user) {
+	zero(user->seed, SEED_LENGTH);
+	user->master_key = NULL;
+	user->child_keys = NULL;
+	user->child_key_count = 0;
+	user->child_key_capacity = 0;
+}
+
 void print_commands() {
 	fprintf(stdout, "Welcome bitcoiner! What is your command?\n"
-	"- new				Creates a new Bitcoin wallet\n"
-	"- key				Display wallet root private key (NEVER SHOW THIS TO ANYONE)\n"
-	"- addresses			Display all bitcoin addresses in wallet\n"
-	"- keys				Display all bitcoin addresses and corresponding private keys for each\n"
-	"- recover			Recovers your bitcoin wallet with mnemonic words(& passphrase, if set)\n"
-	"- receive			Receive bitcoin with a new bitcoin address\n"
+	"- new				Create a new bitcoin wallet\n"
+	"- recover			Recover your bitcoin wallet with mnemonic words(& passphrase, if set)\n"
 	"- balance			Display balance for all addresses in current wallet\n"
+	"- receive			Receive bitcoin with a new address\n"
+	"- send				Send bitcoin to an address\n"
 	"- help				Safety practices, tips, and educational contents\n"
 	"- menu				Show all commands\n"
 	"- exit				Exit program\n\n");
@@ -52,7 +60,10 @@ void print_commands() {
 
 Command_Handler c_handlers[] = {
 	{ (char *)"new", new_handle},
+	{ (char *)"recover", recover_handle},
 	{ (char *)"balance", balance_handle},
+	{ (char *)"receive", receive_handle},
+	{ (char *)"send", send_handle},
 	{ (char *)"help", help_handle},
 	{ (char *)"menu", menu_handle},
 	{ (char *)"exit", exit_handle}
@@ -63,10 +74,16 @@ int32 exit_handle() {
 	exit(0);
 }
 
+int has_wallet() {
+	if (user.seed[0] != 0) return 1;
+	printf("No wallet available for this command. Please generate a new wallet or recover your existing one\n"
+		"Type 'new' or 'recover' to begin\n");
+	return 0; 
+}
+
 int32 new_handle() {
 	printf("Generating a standard BIP44 Bitcoin wallet...\n"
 		"If this program is running locally, strongly recommended that you disconnect from the internet for extra security\n");
-	key_pair_t key_pair = {0};
 	char mnemonic[256];
 	char passphrase[256];
 	char cmd[255];
@@ -124,7 +141,7 @@ int32 new_handle() {
 		}
 	}			
 
-	if (generate_mnemonic(nword, passphrase, mnemonic, sizeof(mnemonic), &key_pair) == 0) {
+	if (generate_mnemonic(nword, passphrase, mnemonic, sizeof(mnemonic), user.seed) == 0) {
 		printf("\nHere is your brand new bitcoin wallet's mnemonic seed words:\n"
 			"\n\n"
 			GREEN"%s\n"RESET
@@ -145,10 +162,26 @@ int32 new_handle() {
 	return 0;
 }
 
+int32 recover_handle() {
+	
+	return 0;
+}
+
 int32 balance_handle() {
+	if (!has_wallet()) return 1;
 	curl_global_init(CURL_GLOBAL_DEFAULT);
 
 	curl_global_cleanup();
+	return 0;
+}
+
+int32 receive_handle() {
+	if (!has_wallet()) return 1;
+	return 0;
+}
+
+int32 send_handle() {
+	if (!has_wallet()) return 1;
 	return 0;
 }
 
@@ -194,6 +227,7 @@ void main_loop() {
 
 int main() {
 	print_logo();
+	init_user(&user);
 	init_gcrypt();
 	print_commands();
 	main_loop();

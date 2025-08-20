@@ -5,7 +5,7 @@
 #include "bip39_words.h"
 #include "crypt.h"
 
-int generate_mnemonic(int word_count, const char *passphrase, char *mnemonic, size_t mnemonic_len, key_pair_t *key_pair) {
+int generate_mnemonic(int word_count, const char *passphrase, char *mnemonic, size_t mnemonic_len, uint8_t *seed_buffer) {
 	const mnemonic_config_t *config = NULL;
 	for (size_t i = 0; i < sizeof(configs) / sizeof(configs[0]); i++) {
 		if (configs[i].word_count == word_count) {
@@ -50,10 +50,10 @@ int generate_mnemonic(int word_count, const char *passphrase, char *mnemonic, si
 	}
 	// Remove trailing spaces
 	if (ptr > mnemonic) *(ptr - 1) = '\0';
-	return mnemonic_to_seed(mnemonic, passphrase, key_pair);
+	return mnemonic_to_seed(mnemonic, passphrase, seed_buffer);
 }
 
-int mnemonic_to_seed(const char *mnemonic, const char *passphrase, key_pair_t *key_pair) {
+int mnemonic_to_seed(const char *mnemonic, const char *passphrase, uint8_t *seed_buffer) {
         // Use PBKDF2 to derive seed (BIP-39)
         // Prepare salt: "mnemonic" + passphrase (or empty string)
 	char salt[128];
@@ -62,6 +62,6 @@ int mnemonic_to_seed(const char *mnemonic, const char *passphrase, key_pair_t *k
 	gcry_error_t err = gcry_kdf_derive(mnemonic, strlen(mnemonic), GCRY_KDF_PBKDF2, GCRY_MD_SHA512, salt, strlen(salt), 2048UL, 64, seed);
 	if (err != 0) return 1;
         // Store in key_pair_t
-	memcpy(key_pair->seed, seed, SEED_LENGTH);
+	memcpy((void *)seed_buffer, seed, SEED_LENGTH);
         return 0;
 }

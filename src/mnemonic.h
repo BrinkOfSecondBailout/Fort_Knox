@@ -19,6 +19,6 @@ static const mnemonic_config_t configs[] = {
         {24, 32, 8}
 };
 
-int generate_mnemonic(int, const char *, char *, size_t, key_pair_t *);
-int mnemonic_to_seed(const char *, const char *, key_pair_t *);
+int generate_mnemonic(int, const char *, char *, size_t, uint8_t *);
+int mnemonic_to_seed(const char *, const char *, uint8_t *);
 #endif

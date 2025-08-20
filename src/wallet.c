@@ -125,14 +125,17 @@ int generate_public_key(const uint8_t *priv_key, uint8_t *pub_key_compressed) {
     	return 0;
 }
 
-int generate_master_key(const key_pair_t *seed_pair, size_t seed_len, key_pair_t *master) {
-	if (seed_len < 16 || seed_len > 64) return 1;
+int generate_master_key(const uint8_t *seed, size_t seed_len, key_pair_t *master) {
+	if (seed_len < 16 || seed_len > 64) {
+		fprintf(stderr, "Invalid seed length\n");
+		return 1;
+	}
 	// Compute HMAC_SHA512
 	uint8_t hmac_output[64];
 	gcry_md_hd_t hmac;
 	if (gcry_md_open(&hmac, GCRY_MD_SHA512, GCRY_MD_FLAG_HMAC) != 0) return 1;
 	gcry_md_setkey(hmac, (const uint8_t *)"Bitcoin seed", strlen("Bitcoin seed"));
-	gcry_md_write(hmac, seed_pair->seed, seed_len);
+	gcry_md_write(hmac, (void *)seed, seed_len);
 	memcpy(hmac_output, gcry_md_read(hmac, GCRY_MD_SHA512), 64);
 	gcry_md_close(hmac);
 	
@@ -209,7 +212,7 @@ int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child
 		fprintf(stderr, "gcry_mpi_scan failure for IL: %s\n", gcry_strerror(err));
 		return 1;
 	}
- 	err = gcry_mpi_scan(&n_mpi, GCRYMPI_FMT_HEX, "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141", 0, NULL);
+ 	err = gcry_mpi_scan(&n_mpi, GCRYMPI_FMT_HEX, N_VALUE_HEX, 0, NULL);
 	if (err) { 
 		fprintf(stderr, "gcry_mpi_scan failure for n: %s\n", gcry_strerror(err));
 		return 1;
