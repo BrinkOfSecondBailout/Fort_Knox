@@ -56,6 +56,27 @@ static int compress_pubkey(gcry_mpi_t x, gcry_mpi_t y, uint8_t *comp_out) {
     	return 0;
 }
 */
+
+// Helper: Hex to bytes
+void hex_to_bytes(const char *hex, uint8_t *bytes, size_t len) {
+  	for (size_t i = 0; i < len; i++) {
+        	sscanf(hex + 2 * i, "%2hhx", &bytes[i]);
+    	}
+}
+
+void resize_convert_hex_to_bytes(const char *hex, uint8_t *bytes) {
+	size_t hex_halved = strlen(hex) / 2;
+	hex_to_bytes(hex, bytes, hex_halved);
+}
+
+// Helper: Print hex
+void print_bytes_as_hex(const char *label, const uint8_t *data, size_t len) {
+    	printf("%s: ", label);
+    	for (size_t i = 0; i < len; i++) printf("%02x", data[i]);
+    	printf("\n");
+}
+
+
 // Generate compressed pub key from priv key(secp256k1)
 int generate_public_key(const uint8_t *priv_key, uint8_t *pub_key_compressed) {
 	// Initialize ECC context for secp256k1
@@ -167,11 +188,11 @@ int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child
 		data[0] = 0x00;
 		memcpy(data + 1, parent->key_priv, PRIVKEY_LENGTH);
 		data_len = 1 + PRIVKEY_LENGTH;
-//print_as_hex("Hardened data (before index)", data, data_len);
+//print_bytes_as_hex("Hardened data (before index)", data, data_len);
 	} else {
 		memcpy(data, parent->key_pub_compressed, PUBKEY_LENGTH);
 		data_len = PUBKEY_LENGTH;
-//print_as_hex("Normal data (before index)", data, data_len);
+//print_bytes_as_hex("Normal data (before index)", data, data_len);
 	}
 	// Append index (big-endian)
 	data[data_len + 0] = (index >> 24) & 0xFF;
@@ -179,8 +200,8 @@ int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child
 	data[data_len + 2] = (index >> 8) & 0xFF;
 	data[data_len + 3] = index & 0xFF;
 	data_len += 4;
-//print_as_hex("Full HMAC input data", data, data_len);	
-//print_as_hex("Parent chain code (HMAC key)", parent->chain_code, CHAINCODE_LENGTH);
+//print_bytes_as_hex("Full HMAC input data", data, data_len);	
+//print_bytes_as_hex("Parent chain code (HMAC key)", parent->chain_code, CHAINCODE_LENGTH);
 	// Compute HMAC-SHA512
     	uint8_t hmac_output[64];
     	gcry_md_hd_t hmac;
@@ -190,15 +211,15 @@ int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child
     	gcry_md_write(hmac, data, data_len);
     	memcpy(hmac_output, gcry_md_read(hmac, GCRY_MD_SHA512), 64);
     	gcry_md_close(hmac);
-//print_as_hex("HMAC output", hmac_output, 64);
+//print_bytes_as_hex("HMAC output", hmac_output, 64);
     	// IL = child offset (left 32 bytes) that's used to generate child private key, IR = child_chain_code (right 32 bytes)
     	uint8_t il[PRIVKEY_LENGTH];
     	memcpy(il, hmac_output, PRIVKEY_LENGTH);
-//print_as_hex("IL (left 32 bytes)", il, PRIVKEY_LENGTH);
+//print_bytes_as_hex("IL (left 32 bytes)", il, PRIVKEY_LENGTH);
 	memset(child->chain_code, 0, CHAINCODE_LENGTH);
     	memcpy(child->chain_code, hmac_output + PRIVKEY_LENGTH, CHAINCODE_LENGTH);
 
-//print_as_hex("Parent Private Key:", parent->key_priv, PRIVKEY_LENGTH);
+//print_bytes_as_hex("Parent Private Key:", parent->key_priv, PRIVKEY_LENGTH);
 
 	gcry_error_t err;
     	gcry_mpi_t parent_priv_mpi, il_mpi, n_mpi, child_priv_mpi;
@@ -218,7 +239,7 @@ int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child
 		return 1;
 	}
 
-//print_as_hex("Parent Pub:", parent->key_pub_compressed, PUBKEY_LENGTH);
+//print_bytes_as_hex("Parent Pub:", parent->key_pub_compressed, PUBKEY_LENGTH);
 
     	child_priv_mpi = gcry_mpi_new(0);
 	if (!child_priv_mpi) return 1;

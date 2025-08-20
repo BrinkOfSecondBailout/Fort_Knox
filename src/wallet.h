@@ -16,7 +16,6 @@
 typedef struct key_pair key_pair_t;
 
 struct key_pair {
-//	uint8_t seed[SEED_LENGTH];
 	uint8_t chain_code[CHAINCODE_LENGTH];
 	uint8_t key_priv[PRIVKEY_LENGTH];
 	uint8_t key_priv_extended[PRIVKEY_LENGTH + CHAINCODE_LENGTH];
@@ -30,6 +29,8 @@ typedef struct {
 	size_t size;
 } curl_buffer_t;
 
+void resize_convert_hex_to_bytes(const char *, uint8_t *);
+void print_bytes_as_hex(const char *, const uint8_t *, size_t);
 int generate_master_key(const uint8_t *seed, size_t, key_pair_t *);
 int derive_child_key(const key_pair_t *, uint32_t, key_pair_t *);
 long long get_account_balance(key_pair_t *, uint32_t, int);

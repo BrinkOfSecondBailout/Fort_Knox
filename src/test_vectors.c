@@ -74,25 +74,6 @@ static const bip32_test_vector_t test_vectors[] = {
 
 static int num_test_vectors = sizeof(test_vectors) / sizeof(bip32_test_vector_t);
 
-// Helper: Hex to bytes
-void hex_to_bytes(const char *hex, uint8_t *bytes, size_t len) {
-  	for (size_t i = 0; i < len; i++) {
-        	sscanf(hex + 2 * i, "%2hhx", &bytes[i]);
-    	}
-}
-
-void resize_convert_hex_to_bytes(const char *hex, uint8_t *bytes) {
-	size_t hex_halved = strlen(hex) / 2;
-	hex_to_bytes(hex, bytes, hex_halved);
-}
-
-// Helper: Print hex
-void print_as_hex(const char *label, const uint8_t *data, size_t len) {
-    	printf("%s: ", label);
-    	for (size_t i = 0; i < len; i++) printf("%02x", data[i]);
-    	printf("\n");
-}
-
 // Test seed derivation (BIP-39)
 int test_seed_derivation(const char *mnemonic, const char *passphrase, const uint8_t *expected_seed) {
 	uint8_t computed_seed[64] = {0}; // Initialize empty key_pair_t
@@ -105,8 +86,8 @@ int test_seed_derivation(const char *mnemonic, const char *passphrase, const uin
     	// Compare with expected
 	int pass = memcmp(computed_seed, expected_seed, 64) == 0;
     	printf("Seed derivation (using mnemonic_to_seed): %s\n", pass ? GREEN"[ PASS ]"RESET : RED"[ FAIL] "RESET);	
-       	print_as_hex("Expect: ", expected_seed, 64);
-        print_as_hex("Result: ", computed_seed, 64);
+       	print_bytes_as_hex("Expect: ", expected_seed, 64);
+        print_bytes_as_hex("Result: ", computed_seed, 64);
 	printf("\n");
 	return !pass;
 }
@@ -154,12 +135,12 @@ int test_master_key(const uint8_t *seed, size_t seed_len, const uint8_t *expecte
 		   memcmp(master.key_pub_compressed, expected_pub, PUBKEY_LENGTH) == 0 &&
                	   memcmp(master.chain_code, expected_chain, CHAINCODE_LENGTH) == 0;
     	printf("Master key generation (using generate_master_key): %s\n", pass ? GREEN"[ PASS ]"RESET : RED"[ FAIL ]"RESET);
-        print_as_hex("Expected master priv:  ", expected_priv, PRIVKEY_LENGTH);
-        print_as_hex("Got master priv:       ", master.key_priv, PRIVKEY_LENGTH);
-	print_as_hex("Expected master pub:   ", expected_pub, PUBKEY_LENGTH);
-	print_as_hex("Got public pub:        ", master.key_pub_compressed, PUBKEY_LENGTH);
-        print_as_hex("Expected master chain: ", expected_chain, CHAINCODE_LENGTH);
-        print_as_hex("Got master chain:      ", master.chain_code, CHAINCODE_LENGTH);
+        print_bytes_as_hex("Expected master priv:  ", expected_priv, PRIVKEY_LENGTH);
+        print_bytes_as_hex("Got master priv:       ", master.key_priv, PRIVKEY_LENGTH);
+	print_bytes_as_hex("Expected master pub:   ", expected_pub, PUBKEY_LENGTH);
+	print_bytes_as_hex("Got public pub:        ", master.key_pub_compressed, PUBKEY_LENGTH);
+        print_bytes_as_hex("Expected master chain: ", expected_chain, CHAINCODE_LENGTH);
+        print_bytes_as_hex("Got master chain:      ", master.chain_code, CHAINCODE_LENGTH);
     	printf("\n");
 	return !pass;
 }
@@ -186,12 +167,12 @@ int test_child_derivation(const key_pair_t *master, const char *path, const uint
 		   memcmp(current.key_pub_compressed, expected_pub, PUBKEY_LENGTH) == 0 &&
           	   memcmp(current.chain_code, expected_chain, CHAINCODE_LENGTH) == 0;
     	printf("Child derivation (%s): %s\n", path, pass ? GREEN"[ PASS ]"RESET : RED"[ FAIL ]"RESET);
-    	print_as_hex("Expected child priv:  ", expected_priv, PRIVKEY_LENGTH);
-    	print_as_hex("Got child priv:       ", current.key_priv, PRIVKEY_LENGTH);
-	print_as_hex("Expected child pub:   ", expected_pub, PUBKEY_LENGTH);
-	print_as_hex("Got child pub:        ", current.key_pub_compressed, PUBKEY_LENGTH);   
- 	print_as_hex("Expected child chain: ", expected_chain, CHAINCODE_LENGTH);
-    	print_as_hex("Got child chain:      ", current.chain_code, CHAINCODE_LENGTH);
+    	print_bytes_as_hex("Expected child priv:  ", expected_priv, PRIVKEY_LENGTH);
+    	print_bytes_as_hex("Got child priv:       ", current.key_priv, PRIVKEY_LENGTH);
+	print_bytes_as_hex("Expected child pub:   ", expected_pub, PUBKEY_LENGTH);
+	print_bytes_as_hex("Got child pub:        ", current.key_pub_compressed, PUBKEY_LENGTH);   
+ 	print_bytes_as_hex("Expected child chain: ", expected_chain, CHAINCODE_LENGTH);
+    	print_bytes_as_hex("Got child chain:      ", current.chain_code, CHAINCODE_LENGTH);
     	printf("\n");
     	return !pass;
 }
