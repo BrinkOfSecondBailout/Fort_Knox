@@ -131,7 +131,7 @@ int32 new_handle() {
 			if (!fgets(cmd, sizeof(cmd), stdin)) {
 				fprintf(stderr, "fgets() failure\n");
 			}
-			cmd[strlen(cmd)] = '\0';
+			cmd[strlen(cmd) - 1] = '\0';
 			int i = 0;
 			while (cmd[i] != '\0') {
 				cmd[i] = tolower((unsigned char)cmd[i]);
@@ -161,7 +161,7 @@ int32 new_handle() {
 		if (!fgets(cmd, sizeof(cmd), stdin)) {
 			fprintf(stderr, "fgets() failure\n");
 		}
-		cmd[strlen(cmd)] = '\0';
+		cmd[strlen(cmd) - 1] = '\0';
 		if (strcmp(cmd, "exit") == 0) exit_handle();
 		nword = atoi(cmd);
 		if (nword != 12 && nword != 15 && nword != 18 && nword != 21 && nword != 24) {
@@ -250,8 +250,8 @@ int32 new_handle() {
 		return 1;
 	}
 	printf("Master key successfully generated.\n");
-verify_seed(user.seed, SEED_LENGTH);
-verify_master_priv_key(user.master_key->key_priv, PRIVKEY_LENGTH);
+print_seed_hashed(user.seed, SEED_LENGTH);
+print_master_priv_key_hashed(user.master_key->key_priv, PRIVKEY_LENGTH);
 	return 0;
 }
 
@@ -268,7 +268,7 @@ int32 recover_handle() {
 			if (!fgets(cmd, sizeof(cmd), stdin)) {
 				fprintf(stderr, "fgets() failure\n");
 			}
-			cmd[strlen(cmd)] = '\0';
+			cmd[strlen(cmd) - 1] = '\0';
 			int i = 0;
 			while (cmd[i] != '\0') {
 				cmd[i] = tolower((unsigned char)cmd[i]);
@@ -294,7 +294,7 @@ int32 recover_handle() {
 		if (!fgets(cmd, sizeof(cmd), stdin)) {
 			fprintf(stderr, "fgets() failure\n");
 		}
-		cmd[strlen(cmd)] = '\0';
+		cmd[strlen(cmd) - 1] = '\0';
 		int i = 0;
 		while (cmd[i] != '\0') {
 			cmd[i] = tolower((unsigned char)cmd[i]);
@@ -311,18 +311,12 @@ int32 recover_handle() {
 	while (1) {
 		printf("Got it! You have a %d words mnemonic seed phrase.\n"
 		"Next, enter your %d words mnemonic seed phrase, each separated by a single space.\n"
-		"Note: all words entered will automatically be converted to lower case.\n"
 		"Example: habit eager gallery cabbage interest vacuum unaware wait invest gap game lab\n> ", nword, nword);
 		zero((void *)mnemonic, sizeof(mnemonic));
 		if (!fgets(mnemonic, sizeof(mnemonic), stdin)) {
 			fprintf(stderr, "fgets() failure\n");
 		}
-		mnemonic[strlen(mnemonic)] = '\0';
-		int i = 0;
-		while (mnemonic[i] != '\0') {
-			mnemonic[i] = tolower((unsigned char)mnemonic[i]);
-			i++;
-		}
+		mnemonic[strlen(mnemonic) - 1] = '\0';
 		size_t mnemonic_len = strlen(mnemonic);
 		if (mnemonic_len == 0) {
 			fprintf(stderr, "Mnemonic seed phrase cannot be blank, type in your %d words again.\n", nword);
@@ -409,8 +403,8 @@ int32 recover_handle() {
 		return 1;
 	}
 	printf("Master key successfully generated.\n");
-verify_seed(user.seed, SEED_LENGTH);
-verify_master_priv_key(user.master_key->key_priv, PRIVKEY_LENGTH);
+print_seed_hashed(user.seed, SEED_LENGTH);
+print_master_priv_key_hashed(user.master_key->key_priv, PRIVKEY_LENGTH);
 	return 0;
 }
 

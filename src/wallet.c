@@ -76,6 +76,19 @@ void print_bytes_as_hex(const char *label, const uint8_t *data, size_t len) {
     	printf("\n");
 }
 
+// Print a hash of the seed, for testing purposes
+void print_seed_hashed(const uint8_t *seed, size_t len) {
+	unsigned char hash[32];
+	gcry_md_hash_buffer(GCRY_MD_SHA256, hash, seed, len);
+	print_bytes_as_hex("Seed (Hashed SHA-256) -", hash, 32);
+}
+
+// Print a hash of the master private key, for testing purposes
+void print_master_priv_key_hashed(const uint8_t *priv, size_t len) {
+	unsigned char hash[32];
+	gcry_md_hash_buffer(GCRY_MD_SHA256, hash, priv, len);
+	print_bytes_as_hex("Master Private Key (Hashed SHA-256) -", hash, 32);
+}
 
 // Generate compressed pub key from priv key(secp256k1)
 int generate_public_key(const uint8_t *priv_key, uint8_t *pub_key_compressed) {
