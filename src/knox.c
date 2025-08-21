@@ -250,8 +250,6 @@ int32 new_handle() {
 		return 1;
 	}
 	printf("Master key successfully generated.\n");
-print_seed_hashed(user.seed, SEED_LENGTH);
-print_master_priv_key_hashed(user.master_key->key_priv, PRIVKEY_LENGTH);
 	return 0;
 }
 
@@ -403,8 +401,6 @@ int32 recover_handle() {
 		return 1;
 	}
 	printf("Master key successfully generated.\n");
-print_seed_hashed(user.seed, SEED_LENGTH);
-print_master_priv_key_hashed(user.master_key->key_priv, PRIVKEY_LENGTH);
 	return 0;
 }
 
@@ -426,6 +422,10 @@ int32 receive_handle() {
 		"Type 'new' or 'recover' to begin\n");
 		return 1;
 	}
+	// generate new child keys 
+	// (m/44'/0'/0'/0/0 to m/44'/0'/0'/0/19 for external, and same for internal addresses)
+		
+
 	return 0;
 }
 
