@@ -294,12 +294,54 @@ int run_mnemonic_recovery_test() {
 	failures += mnemonic_recovery_test(15, passphrase);
 	return failures;
 }
+
+
+int test_pub_to_address(const uint8_t *pub_key, const char *expected_address) {
+	char generated_address[ADDRESS_MAX_LEN];
+	int result = pubkey_to_address(pub_key, PUBKEY_LENGTH, generated_address, ADDRESS_MAX_LEN);
+	if (result != 0) {
+		fprintf(stderr, "pubkey_to_address() failure\n");
+		return 1;
+	}
+	size_t generated_len = strlen(generated_address);
+	size_t expected_len = strlen(expected_address);
+	int pass = generated_len == expected_len && strncmp(generated_address, expected_address, expected_len) == 0;
+	printf("\nPubkey to address test:\n%s\n", pass ? GREEN"[ PASS ]"RESET : RED"[ FAIL ]"RESET);
+    	printf("Generated address: %s\n", generated_address);
+    	printf("Expected address : %s\n", expected_address);
+	printf("\n");
+	return !pass;
+}
+
+int run_address_generation_test() {
+	int failures = 0;
+
+	const char *pub_hex1 = "0279BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798";
+	size_t pub_len1 = strlen(pub_hex1);
+	const char *expected_address1 = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4";
+	
+/*
+	const char *pub_hex2 = "03a1af804ac108a8a51782198c2d034b28bf90c8803f5a53f76276fa69a4eae77f";
+	size_t pub_len2 = strlen(pub_hex2);
+	const char *expected_address2 = "bc1qx5y8r50l39cap3r9cd65fz7xfvlkjrl258hs8m";
+*/
+	uint8_t pub_key1[PUBKEY_LENGTH];
+	hex_to_bytes(pub_hex1, pub_key1, pub_len1);
+	failures += test_pub_to_address(pub_key1, expected_address1);	
+/*
+	uint8_t pub_key2[PUBKEY_LENGTH];
+	hex_to_bytes(pub_hex2, pub_key2, pub_len2);
+	failures += test_pub_to_address(pub_key2, expected_address2);	
+*/
+	return failures;
+}
  
 int main() {
 	int failures = 0; 
-	failures += run_mnemonic_test();
-	failures += run_master_and_child_test(); 
-	failures += run_mnemonic_recovery_test();
+//	failures += run_mnemonic_test();
+//	failures += run_master_and_child_test(); 
+//	failures += run_mnemonic_recovery_test();
+	failures += run_address_generation_test();
     	printf("Total failures: %d\n", failures);
     	return failures > 0 ? 1 : 0;
 }

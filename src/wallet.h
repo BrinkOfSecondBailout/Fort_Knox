@@ -13,7 +13,7 @@
 #define CHECKSUM 4
 #define GAP_LIMIT 20
 #define ADDRESS_MAX_LEN 100
-
+#define BECH32_VALUES_MAX 100
 typedef struct key_pair key_pair_t;
 
 struct key_pair {
@@ -30,10 +30,12 @@ typedef struct {
 	size_t size;
 } curl_buffer_t;
 
+void hex_to_bytes(const char *, uint8_t *, size_t);
 void resize_convert_hex_to_bytes(const char *, uint8_t *);
 void print_bytes_as_hex(const char *, const uint8_t *, size_t);
 void print_seed_hashed(const uint8_t *, size_t);
 void print_master_priv_key_hashed(const uint8_t *, size_t);
+int pubkey_to_address(const uint8_t *, size_t, char *, size_t);
 int generate_master_key(const uint8_t *seed, size_t, key_pair_t *);
 int derive_child_key(const key_pair_t *, uint32_t, key_pair_t *);
 long long get_account_balance(key_pair_t *, uint32_t, int);

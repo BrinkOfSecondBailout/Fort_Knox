@@ -90,6 +90,257 @@ void print_master_priv_key_hashed(const uint8_t *priv, size_t len) {
 	print_bytes_as_hex("Master Private Key (Hashed SHA-256) -", hash, 32);
 }
 
+// Helper: Print individual bits of a buffer for debugging
+void print_bits(const char *label, const uint8_t *buffer, size_t len) {
+    if (!label || !buffer) {
+        printf("Error: Invalid input to print_bits\n");
+        return;
+    }
+    printf("%s (%zu bytes):\n", label, len);
+    for (size_t i = 0; i < len; i++) {
+        printf("Byte %zu: ", i);
+        for (int j = 7; j >= 0; j--) { // Print MSB to LSB
+            printf("%d", (buffer[i] >> j) & 1);
+            if (j > 0) printf(" "); // Space between bits
+        }
+        printf(" (0x%02x)\n", buffer[i]);
+    }
+}
+
+static const char *bech32_charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+
+// Helper: Print 5-bit groups in binary for checksum debugging
+void print_5bit_groups(const char *label, const uint8_t *groups, size_t num_groups) {
+    printf("%s (%zu groups):\n", label, num_groups);
+    for (size_t i = 0; i < num_groups; i++) {
+        printf("Group %zu: ", i);
+        for (int j = 4; j >= 0; j--) { // Print MSB to LSB for 5 bits
+            printf("%d", (groups[i] >> j) & 1);
+        }
+        printf(" (%u, char '%c')\n", groups[i], bech32_charset[groups[i]]);
+    }
+}
+
+
+
+void convert_bits(uint8_t *out, size_t *outlen, const uint8_t *in, size_t inlen, int inbits, int outbits, int pad) {
+	// Convert witness program bytes in to groups of 8 bits then split into groups of 5-bit
+print_bits("convert_bits input", in, inlen);
+	uint32_t val = 0;
+	int bits = 0;
+	size_t idx = 0;
+	for (size_t i = 0; i < inlen; i++) {
+		val = (val << 8) | in[i];
+		bits += 8;
+		while (bits >= outbits) {
+			bits -= outbits;
+			out[idx++] = (val >> bits) & ((1 << outbits) - 1);
+		}
+	}
+	if (pad && bits) {
+		out[idx++] = (val << (outbits - bits)) & ((1 << outbits) - 1);
+	}
+	*outlen = idx;
+printf("\n");
+print_bits("convert_bits output", out, idx);
+}
+
+static uint32_t bech32_polymod(const uint8_t *values, size_t len) {
+    static const uint32_t gen[] = {0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3};
+    uint32_t chk = 1;
+    for (size_t i = 0; i < len; i++) {
+        uint32_t b = chk >> 25;
+        chk = (chk & 0x1ffffff) << 5 ^ values[i];
+        for (int j = 0; j < 5; j++) {
+            chk ^= ((b >> j) & 1) ? gen[j] : 0;
+        }
+    }
+print_bits("Checksum",  (uint8_t*)&chk, sizeof(chk));
+    return chk;
+}
+
+int bech32_encode(const char *hrp, const uint8_t *data, size_t data_len, char *output, size_t output_len) {
+    if (!hrp || !data || !output || output_len < strlen(hrp) + data_len + 8) return 1;
+
+    // Convert data to 5-bit groups
+    uint8_t values[BECH32_VALUES_MAX];
+    size_t values_len;
+    convert_bits(values, &values_len, data, data_len, 8, 5, 1);
+    if (values_len == 0 || values_len > BECH32_VALUES_MAX) return 1;
+
+    // Add HRP and compute checksum
+    size_t hrp_len = strlen(hrp);
+    size_t check_values_len = values_len + hrp_len * 2 + 1; // +1 for separator
+    uint8_t *check_values = gcry_malloc_secure(check_values_len);
+    if (!check_values) return 1;
+
+    size_t check_len = 0;
+    for (size_t i = 0; i < hrp_len; i++) {
+        if (check_len + 2 > check_values_len) {
+            gcry_free(check_values);
+            return 1;
+        }
+        check_values[check_len++] = hrp[i] >> 5;
+        check_values[check_len++] = hrp[i] & 31;
+    }
+    check_values[check_len++] = 0; // Separator
+    if (check_len + values_len > check_values_len) {
+        gcry_free(check_values);
+        return 1;
+    }
+    memcpy(check_values + check_len, values, values_len);
+    check_len += values_len;
+
+    // Compute checksum
+    uint32_t polymod = bech32_polymod(check_values, check_len) ^ 1;
+    gcry_free(check_values);
+
+    // Append checksum to values
+    uint8_t checksum[6];
+    for (int i = 0; i < 6; i++) {
+        if (values_len >= BECH32_VALUES_MAX) return 1;
+        values[values_len] = (polymod >> (5 * (5 - i))) & 31;
+	checksum[i] = values[values_len];
+	values_len++;
+    }
+    print_5bit_groups("Computed Checksum Groups", checksum, 6);
+
+    // Encode output
+    size_t pos = 0;
+    memcpy(output, hrp, hrp_len);
+    pos += hrp_len;
+    output[pos++] = '1';
+    for (size_t i = 0; i < values_len; i++) {
+        if (pos >= output_len - 1) return 1;
+        output[pos++] = bech32_charset[values[i]];
+    }
+    output[pos] = '\0';
+    return 0;
+}
+
+
+/*
+int bech32_encode(const char *hrp, const uint8_t *data, size_t data_len, char *output, size_t output_len) {
+	// hrp = 'human readable part', for bitcoin it's 'bc'
+	if (!hrp || !data || !output || output_len < strlen(hrp) + data_len + 8) return 1;
+	// Convert data to 5-bit groups
+	uint8_t values[BECH32_VALUES_MAX];
+	size_t values_len;
+	convert_bits(values, &values_len, data, data_len, 8, 5, 1);
+	// Add HRP and compute checksum
+	size_t hrp_len = strlen(hrp);
+// Buffer overflow V
+	uint8_t check_values[values_len + hrp_len * 2 + 1];
+	size_t check_len = 0;
+	for (size_t i = 0; i < hrp_len; i++) {
+		check_values[check_len++] = hrp[i] >> 5;
+		check_values[check_len++] = hrp[i] & 31;
+	}
+	check_values[check_len++] = 0; // Separator
+// Buffer overflow V
+	memcpy(check_values + check_len, values, values_len);
+	check_len += values_len;
+	// Compute checksum
+	uint32_t polymod = bech32_polymod(check_values, check_len) ^ 1;
+	for (int i = 0; i < 6; i++) {
+		values[values_len++] = (polymod >> (5 * (5 - i))) & 31;
+	}
+	// Encode output
+	size_t pos = 0;
+	memcpy(output, hrp, hrp_len);
+	pos += hrp_len;
+	output[pos++] = '1';
+	for (size_t i = 0; i < values_len; i++) {
+		if (pos >= output_len - 1) return -1;
+		output[pos++] = bech32_charset[values[i]];
+	}
+	output[pos] = '\0';
+	return 0;
+}
+*/
+
+// Convert compressed pub to P2WPKH (Segwit) address
+int pubkey_to_address(const uint8_t *pub_key, size_t pub_key_len, char *address, size_t address_len) {
+	if (pub_key_len != PUBKEY_LENGTH || !address) return -1;
+print_bytes_as_hex("Original pub key (33 bytes)", pub_key, pub_key_len);
+	// Compute SHA256
+	uint8_t sha256[32];
+	gcry_md_hash_buffer(GCRY_MD_SHA256, sha256, pub_key, pub_key_len);
+print_bytes_as_hex("After SHA256", sha256, 32);
+	// Compute RIPEMD160
+	uint8_t ripemd160[20];
+	gcry_md_hash_buffer(GCRY_MD_RMD160, ripemd160, sha256, 32);
+print_bytes_as_hex("After RIPEMD160 (PubKeyHash) (20 bytes)", ripemd160, 20);
+	// Successfully created a P2WPKH scriptPubKey
+	// Convert PubKeyHash to 5-bit groups
+	uint8_t program_values[BECH32_VALUES_MAX];
+	size_t program_values_len;
+	convert_bits(program_values, &program_values_len, ripemd160, 20, 8, 5, 1);
+	if (program_values_len != 32) { // Expected for 20 bytes (160 bits / 5 = 32, no pad)
+		fprintf(stderr, "Unexpected program length: %zu\n", program_values_len);
+		return 1;
+	}
+	// Data values = version (5-bit) + program_values
+	uint8_t data_values[BECH32_VALUES_MAX];
+	data_values[0] = 0;
+	memcpy(data_values + 1, program_values, program_values_len);
+	size_t data_values_len = 1 + program_values_len;
+	// Add HRP and compute checksum
+	const char *hrp = "bc"; // Mainnet, use 'tb' for testnet
+	size_t hrp_len = strlen(hrp);
+	size_t check_values_len = data_values_len + hrp_len * 2 + 1; // 1 for separator
+	uint8_t *check_values = gcry_malloc_secure(check_values_len);
+	if (!check_values) return 1;
+	
+	size_t check_len = 0;
+	for (size_t i = 0; i < hrp_len; i++) {
+		check_values[check_len++] = hrp[i] >> 5;
+		check_values[check_len++] = hrp[i] & 31;
+	}
+	check_values[check_len++] = 0; // Separator
+    	memcpy(check_values + check_len, data_values, data_values_len);
+    	check_len += data_values_len;
+
+    	// Compute checksum
+    	uint32_t polymod = bech32_polymod(check_values, check_len) ^ 1;
+    	gcry_free(check_values);
+
+    	// Append checksum to data_values
+    	for (int i = 0; i < 6; i++) {
+        	if (data_values_len >= BECH32_VALUES_MAX) return 1;
+        	data_values[data_values_len++] = (polymod >> (5 * (5 - i))) & 31;
+    	}
+
+    	// Encode output
+    	size_t pos = 0;
+    	memcpy(address, hrp, hrp_len);
+    	pos += hrp_len;
+    	address[pos++] = '1';
+    	for (size_t i = 0; i < data_values_len; i++) {
+        	if (pos >= address_len - 1) return 1;
+        	address[pos++] = bech32_charset[data_values[i]];
+    	}
+    	address[pos] = '\0';
+    	return 0;
+}
+
+
+
+
+/*
+	// Create witness program
+	uint8_t witness_program[22];
+//	unsigned char witness_program[22];
+	witness_program[0] = 0x00; // Witness version 0
+	witness_program[1] = 0x14; // OP_PUSHBYTES_20
+	memcpy(witness_program + 2, ripemd160, 20);
+print_bytes_as_hex("Witness (ScriptPubKey) (22 bytes)", witness_program, 22);
+	// Encode as Bech32
+	return bech32_encode("bc", witness_program, 22, address, address_len); // "tb" for testnet
+}
+*/
+
+
 // Generate compressed pub key from priv key(secp256k1)
 int generate_public_key(const uint8_t *priv_key, uint8_t *pub_key_compressed) {
 	// Initialize ECC context for secp256k1
@@ -196,16 +447,13 @@ int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child
 	uint8_t data[37]; // For HMAC input, 1 + 32 priv + 4 index or 33 pub + 4 index
 	size_t data_len;
 	int hardened = (index & 0x80000000) != 0; // 0: normal, 0x80000000: hardened
-//printf("Hardened: %d\n", hardened);	
 	if (hardened) {
 		data[0] = 0x00;
 		memcpy(data + 1, parent->key_priv, PRIVKEY_LENGTH);
 		data_len = 1 + PRIVKEY_LENGTH;
-//print_bytes_as_hex("Hardened data (before index)", data, data_len);
 	} else {
 		memcpy(data, parent->key_pub_compressed, PUBKEY_LENGTH);
 		data_len = PUBKEY_LENGTH;
-//print_bytes_as_hex("Normal data (before index)", data, data_len);
 	}
 	// Append index (big-endian)
 	data[data_len + 0] = (index >> 24) & 0xFF;
@@ -213,8 +461,6 @@ int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child
 	data[data_len + 2] = (index >> 8) & 0xFF;
 	data[data_len + 3] = index & 0xFF;
 	data_len += 4;
-//print_bytes_as_hex("Full HMAC input data", data, data_len);	
-//print_bytes_as_hex("Parent chain code (HMAC key)", parent->chain_code, CHAINCODE_LENGTH);
 	// Compute HMAC-SHA512
     	uint8_t hmac_output[64];
     	gcry_md_hd_t hmac;
@@ -224,15 +470,11 @@ int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child
     	gcry_md_write(hmac, data, data_len);
     	memcpy(hmac_output, gcry_md_read(hmac, GCRY_MD_SHA512), 64);
     	gcry_md_close(hmac);
-//print_bytes_as_hex("HMAC output", hmac_output, 64);
     	// IL = child offset (left 32 bytes) that's used to generate child private key, IR = child_chain_code (right 32 bytes)
     	uint8_t il[PRIVKEY_LENGTH];
     	memcpy(il, hmac_output, PRIVKEY_LENGTH);
-//print_bytes_as_hex("IL (left 32 bytes)", il, PRIVKEY_LENGTH);
 	memset(child->chain_code, 0, CHAINCODE_LENGTH);
     	memcpy(child->chain_code, hmac_output + PRIVKEY_LENGTH, CHAINCODE_LENGTH);
-
-//print_bytes_as_hex("Parent Private Key:", parent->key_priv, PRIVKEY_LENGTH);
 
 	gcry_error_t err;
     	gcry_mpi_t parent_priv_mpi, il_mpi, n_mpi, child_priv_mpi;
@@ -252,8 +494,6 @@ int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child
 		return 1;
 	}
 
-//print_bytes_as_hex("Parent Pub:", parent->key_pub_compressed, PUBKEY_LENGTH);
-
     	child_priv_mpi = gcry_mpi_new(0);
 	if (!child_priv_mpi) return 1;
 
@@ -272,7 +512,6 @@ int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child
         	return 1;
     	}
     	gcry_mpi_release(child_priv_mpi);
-//printf("gcry_mpi_print succeeded, written = %zu\n", written);
 
     	// Generate child public key
 	memset(child->key_pub_compressed, 0, PUBKEY_LENGTH);
@@ -287,7 +526,6 @@ int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child
     	memcpy(child->key_pub_extended, child->key_pub_compressed, PUBKEY_LENGTH);
     	memcpy(child->key_pub_extended + PUBKEY_LENGTH, child->chain_code, CHAINCODE_LENGTH); 
 	child->key_index = index & 0xFF;
-//printf("Child index set to: 0x%02x\n", child->key_index);    	
 	return 0;
 }
 

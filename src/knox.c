@@ -24,6 +24,12 @@ void zero_multiple(void *buf, ...) {
 	va_end(args);
 }
 
+void zero_and_gcry_free(void *buf, size_t size) {
+	if (!buf) return;
+	zero(buf, size);
+	gcry_free(buf);
+}
+
 void print_logo() {
 	FILE *logo = fopen("logo.txt", "r");
 	char buffer[1024];
@@ -422,10 +428,80 @@ int32 receive_handle() {
 		"Type 'new' or 'recover' to begin\n");
 		return 1;
 	}
-	// generate new child keys 
-	// (m/44'/0'/0'/0/0 to m/44'/0'/0'/0/19 for external, and same for internal addresses)
-		
-
+	// Work our way down the path to m/44'/0'/0'/0
+	key_pair_t *account_key = NULL;
+	int result = derive_child_key(user.master_key, 0x80000000 | 44, account_key); // m/44'
+	if (result != 0) {
+		fprintf(stderr, "Failed to derive purpose key\n");
+		return 1;
+	}
+	key_pair_t *coin_key = NULL;
+	result = derive_child_key(account_key, 0x80000000 | 0, coin_key); // m/44'/0'
+	if (result != 0) {
+		fprintf(stderr, "Failed to derive coin key\n");
+		return 1;
+	}
+	key_pair_t *account0_key = NULL;
+	result = derive_child_key(coin_key, 0x80000000 | 0, account0_key); // m/44'/0'/0'
+	if (result != 0) {
+		fprintf(stderr, "Failed to derive account 0 key\n");
+		return 1;
+	}
+	// Generate up to 20 child keys (external chain: m/44'/0'/0'/0)
+	for (uint32_t i = user.child_key_count; i < GAP_LIMIT && i < user.child_key_capacity; i++) {
+		key_pair_t *child_key = NULL;
+		result = derive_child_key(account0_key, i, child_key); // m/44'/0'/0'/0/i
+		if (result != 0) {
+			fprintf(stderr, "Failed to derive child key %u\n", i);
+			continue;
+		}
+		// Resize child keys dynamic array if needed
+		if (user.child_key_count >= user.child_key_capacity) {
+			user.child_key_capacity *= 2;
+			user.child_keys = gcry_realloc(user.child_keys, 
+					user.child_key_capacity * sizeof(key_pair_t *));
+			if (!user.child_keys) {
+				zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
+				zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
+				zero_and_gcry_free((void *)coin_key, sizeof(key_pair_t));
+				zero_and_gcry_free((void *)account0_key, sizeof(key_pair_t));
+				fprintf(stderr, "Failure to resize child_keys dynamic array.\n");
+				return 1;
+			}
+			for (size_t j = user.child_key_count; j < user.child_key_capacity; j++) {
+				user.child_keys[j] = NULL;
+			}	
+		}
+		user.child_keys[user.child_key_count++] = child_key;
+	}
+	// Use the last generated child key for receive address
+	if (user.child_key_count == 0) {
+		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
+		zero_and_gcry_free((void *)coin_key, sizeof(key_pair_t));
+		zero_and_gcry_free((void *)account0_key, sizeof(key_pair_t));
+		fprintf(stderr, "No child keys available.\n");
+		return 1;
+	}
+	key_pair_t *receive_key = user.child_keys[user.child_key_count - 1];
+	char address[ADDRESS_MAX_LEN];
+	result = pubkey_to_address(receive_key->key_pub_compressed, PUBKEY_LENGTH, address, ADDRESS_MAX_LEN);
+	if (result != 0) {
+		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
+		zero_and_gcry_free((void *)coin_key, sizeof(key_pair_t));
+		zero_and_gcry_free((void *)account0_key, sizeof(key_pair_t));
+		fprintf(stderr, "Failed to generate receive address.\n");
+		return 1;
+	}
+	// Clean up intermediate keys
+	zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
+	zero_and_gcry_free((void *)coin_key, sizeof(key_pair_t));
+	zero_and_gcry_free((void *)account0_key, sizeof(key_pair_t));
+	// New receive address
+	printf("New receive address: %s\n", address);
+	printf("Use this adddress to receive Bitcoin. You can:\n"
+		"- Copy and share this address directly.\n"
+		"- Generate a QR code by running a tool like 'qrencode' (e.g. 'qrencode -o qrcode.png %s').\n"
+		"- Scan the QR code to send funds.\n", address);
 	return 0;
 }
 
