@@ -4,6 +4,7 @@
 #include <gcrypt.h>
 #include <curl/curl.h>
 #include "test_vectors.h"
+
 static const char *base58_chars = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 //static const char *secp256k1_params = "(ecc (p #FFFFFFFFFFFFFFFEFFFFFFFC2F#) (a #0#) (b #7#) (g #79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798# #483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8#) (n #FFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141#) (h #1#))";
 
@@ -121,11 +122,9 @@ void print_5bit_groups(const char *label, const uint8_t *groups, size_t num_grou
     }
 }
 
-
-
 void convert_bits(uint8_t *out, size_t *outlen, const uint8_t *in, size_t inlen, int inbits, int outbits, int pad) {
 	// Convert witness program bytes in to groups of 8 bits then split into groups of 5-bit
-print_bits("convert_bits input", in, inlen);
+//print_bits("convert_bits input", in, inlen);
 	uint32_t val = 0;
 	int bits = 0;
 	size_t idx = 0;
@@ -141,11 +140,12 @@ print_bits("convert_bits input", in, inlen);
 		out[idx++] = (val << (outbits - bits)) & ((1 << outbits) - 1);
 	}
 	*outlen = idx;
-printf("\n");
-print_bits("convert_bits output", out, idx);
+//printf("\n");
+//print_bits("convert_bits output", out, idx);
 }
 
 static uint32_t bech32_polymod(const uint8_t *values, size_t len) {
+//printf("Size of values: %ld\n", len);
     static const uint32_t gen[] = {0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3};
     uint32_t chk = 1;
     for (size_t i = 0; i < len; i++) {
@@ -155,110 +155,8 @@ static uint32_t bech32_polymod(const uint8_t *values, size_t len) {
             chk ^= ((b >> j) & 1) ? gen[j] : 0;
         }
     }
-print_bits("Checksum",  (uint8_t*)&chk, sizeof(chk));
     return chk;
 }
-
-int bech32_encode(const char *hrp, const uint8_t *data, size_t data_len, char *output, size_t output_len) {
-    if (!hrp || !data || !output || output_len < strlen(hrp) + data_len + 8) return 1;
-
-    // Convert data to 5-bit groups
-    uint8_t values[BECH32_VALUES_MAX];
-    size_t values_len;
-    convert_bits(values, &values_len, data, data_len, 8, 5, 1);
-    if (values_len == 0 || values_len > BECH32_VALUES_MAX) return 1;
-
-    // Add HRP and compute checksum
-    size_t hrp_len = strlen(hrp);
-    size_t check_values_len = values_len + hrp_len * 2 + 1; // +1 for separator
-    uint8_t *check_values = gcry_malloc_secure(check_values_len);
-    if (!check_values) return 1;
-
-    size_t check_len = 0;
-    for (size_t i = 0; i < hrp_len; i++) {
-        if (check_len + 2 > check_values_len) {
-            gcry_free(check_values);
-            return 1;
-        }
-        check_values[check_len++] = hrp[i] >> 5;
-        check_values[check_len++] = hrp[i] & 31;
-    }
-    check_values[check_len++] = 0; // Separator
-    if (check_len + values_len > check_values_len) {
-        gcry_free(check_values);
-        return 1;
-    }
-    memcpy(check_values + check_len, values, values_len);
-    check_len += values_len;
-
-    // Compute checksum
-    uint32_t polymod = bech32_polymod(check_values, check_len) ^ 1;
-    gcry_free(check_values);
-
-    // Append checksum to values
-    uint8_t checksum[6];
-    for (int i = 0; i < 6; i++) {
-        if (values_len >= BECH32_VALUES_MAX) return 1;
-        values[values_len] = (polymod >> (5 * (5 - i))) & 31;
-	checksum[i] = values[values_len];
-	values_len++;
-    }
-    print_5bit_groups("Computed Checksum Groups", checksum, 6);
-
-    // Encode output
-    size_t pos = 0;
-    memcpy(output, hrp, hrp_len);
-    pos += hrp_len;
-    output[pos++] = '1';
-    for (size_t i = 0; i < values_len; i++) {
-        if (pos >= output_len - 1) return 1;
-        output[pos++] = bech32_charset[values[i]];
-    }
-    output[pos] = '\0';
-    return 0;
-}
-
-
-/*
-int bech32_encode(const char *hrp, const uint8_t *data, size_t data_len, char *output, size_t output_len) {
-	// hrp = 'human readable part', for bitcoin it's 'bc'
-	if (!hrp || !data || !output || output_len < strlen(hrp) + data_len + 8) return 1;
-	// Convert data to 5-bit groups
-	uint8_t values[BECH32_VALUES_MAX];
-	size_t values_len;
-	convert_bits(values, &values_len, data, data_len, 8, 5, 1);
-	// Add HRP and compute checksum
-	size_t hrp_len = strlen(hrp);
-// Buffer overflow V
-	uint8_t check_values[values_len + hrp_len * 2 + 1];
-	size_t check_len = 0;
-	for (size_t i = 0; i < hrp_len; i++) {
-		check_values[check_len++] = hrp[i] >> 5;
-		check_values[check_len++] = hrp[i] & 31;
-	}
-	check_values[check_len++] = 0; // Separator
-// Buffer overflow V
-	memcpy(check_values + check_len, values, values_len);
-	check_len += values_len;
-	// Compute checksum
-	uint32_t polymod = bech32_polymod(check_values, check_len) ^ 1;
-	for (int i = 0; i < 6; i++) {
-		values[values_len++] = (polymod >> (5 * (5 - i))) & 31;
-	}
-	// Encode output
-	size_t pos = 0;
-	memcpy(output, hrp, hrp_len);
-	pos += hrp_len;
-	output[pos++] = '1';
-	for (size_t i = 0; i < values_len; i++) {
-		if (pos >= output_len - 1) return -1;
-		output[pos++] = bech32_charset[values[i]];
-	}
-	output[pos] = '\0';
-	return 0;
-}
-*/
-
 // Convert compressed pub to P2WPKH (Segwit) address
 int pubkey_to_address(const uint8_t *pub_key, size_t pub_key_len, char *address, size_t address_len) {
 	if (pub_key_len != PUBKEY_LENGTH || !address) return -1;
@@ -271,7 +169,7 @@ print_bytes_as_hex("After SHA256", sha256, 32);
 	uint8_t ripemd160[20];
 	gcry_md_hash_buffer(GCRY_MD_RMD160, ripemd160, sha256, 32);
 print_bytes_as_hex("After RIPEMD160 (PubKeyHash) (20 bytes)", ripemd160, 20);
-	// Successfully created a P2WPKH scriptPubKey
+	// Successfully created a P2WPKH scriptPubKey (PubKeyHash)
 	// Convert PubKeyHash to 5-bit groups
 	uint8_t program_values[BECH32_VALUES_MAX];
 	size_t program_values_len;
@@ -285,6 +183,7 @@ print_bytes_as_hex("After RIPEMD160 (PubKeyHash) (20 bytes)", ripemd160, 20);
 	data_values[0] = 0;
 	memcpy(data_values + 1, program_values, program_values_len);
 	size_t data_values_len = 1 + program_values_len;
+
 	// Add HRP and compute checksum
 	const char *hrp = "bc"; // Mainnet, use 'tb' for testnet
 	size_t hrp_len = strlen(hrp);
@@ -293,16 +192,42 @@ print_bytes_as_hex("After RIPEMD160 (PubKeyHash) (20 bytes)", ripemd160, 20);
 	if (!check_values) return 1;
 	
 	size_t check_len = 0;
+	// Append all high bits (top 3 bits) for each character of HRP
 	for (size_t i = 0; i < hrp_len; i++) {
+		if (check_len >= check_values_len) {
+			gcry_free(check_values);
+			return 1;
+		}
 		check_values[check_len++] = hrp[i] >> 5;
+	}
+	// Append separator
+	if (check_len >= check_values_len) {
+		gcry_free(check_values);
+		return 1;
+	}
+	check_values[check_len++] = 0;
+	// Append all low bits (bottom 5 bits) for each character of HRP
+	for (size_t i = 0; i < hrp_len; i++) {
+		if (check_len >= check_values_len) {
+			gcry_free(check_values);
+			return 1;
+		}
 		check_values[check_len++] = hrp[i] & 31;
 	}
-	check_values[check_len++] = 0; // Separator
+
+//print_5bit_groups("HRP", check_values, 5);
+//print_5bit_groups("Data Values", data_values, 33);
     	memcpy(check_values + check_len, data_values, data_values_len);
     	check_len += data_values_len;
 
+	// Append six zeros for padding
+	memset(check_values + check_len, 0, 6);
+	check_len += 6;
+
+//printf("check_values allocated: %zu bytes, used: %zu bytes\n", check_values_len, check_len);
+//print_bytes_as_hex("Check Values", check_values, check_len);
     	// Compute checksum
-    	uint32_t polymod = bech32_polymod(check_values, check_len) ^ 1;
+    	uint32_t polymod = (bech32_polymod(check_values, check_len)) ^ 1;
     	gcry_free(check_values);
 
     	// Append checksum to data_values
@@ -310,7 +235,6 @@ print_bytes_as_hex("After RIPEMD160 (PubKeyHash) (20 bytes)", ripemd160, 20);
         	if (data_values_len >= BECH32_VALUES_MAX) return 1;
         	data_values[data_values_len++] = (polymod >> (5 * (5 - i))) & 31;
     	}
-
     	// Encode output
     	size_t pos = 0;
     	memcpy(address, hrp, hrp_len);
@@ -323,23 +247,6 @@ print_bytes_as_hex("After RIPEMD160 (PubKeyHash) (20 bytes)", ripemd160, 20);
     	address[pos] = '\0';
     	return 0;
 }
-
-
-
-
-/*
-	// Create witness program
-	uint8_t witness_program[22];
-//	unsigned char witness_program[22];
-	witness_program[0] = 0x00; // Witness version 0
-	witness_program[1] = 0x14; // OP_PUSHBYTES_20
-	memcpy(witness_program + 2, ripemd160, 20);
-print_bytes_as_hex("Witness (ScriptPubKey) (22 bytes)", witness_program, 22);
-	// Encode as Bech32
-	return bech32_encode("bc", witness_program, 22, address, address_len); // "tb" for testnet
-}
-*/
-
 
 // Generate compressed pub key from priv key(secp256k1)
 int generate_public_key(const uint8_t *priv_key, uint8_t *pub_key_compressed) {

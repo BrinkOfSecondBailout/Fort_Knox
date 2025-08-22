@@ -319,20 +319,18 @@ int run_address_generation_test() {
 	const char *pub_hex1 = "0279BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798";
 	size_t pub_len1 = strlen(pub_hex1);
 	const char *expected_address1 = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4";
-	
-/*
-	const char *pub_hex2 = "03a1af804ac108a8a51782198c2d034b28bf90c8803f5a53f76276fa69a4eae77f";
-	size_t pub_len2 = strlen(pub_hex2);
-	const char *expected_address2 = "bc1qx5y8r50l39cap3r9cd65fz7xfvlkjrl258hs8m";
-*/
 	uint8_t pub_key1[PUBKEY_LENGTH];
 	hex_to_bytes(pub_hex1, pub_key1, pub_len1);
 	failures += test_pub_to_address(pub_key1, expected_address1);	
-/*
+	
+	const char *pub_hex2 = "03a1af804ac108a8a51782198c2d034b28bf90c8803f5a53f76276fa69a4eae77f";
+	size_t pub_len2 = strlen(pub_hex2);
+	const char *expected_address2 = "bc1q8zt37uunpakpg8vh0tz06jnj0jz5jddn7ayctz";
 	uint8_t pub_key2[PUBKEY_LENGTH];
 	hex_to_bytes(pub_hex2, pub_key2, pub_len2);
-	failures += test_pub_to_address(pub_key2, expected_address2);	
-*/
+	failures += test_pub_to_address(pub_key2, expected_address2);
+	
+	
 	return failures;
 }
  
