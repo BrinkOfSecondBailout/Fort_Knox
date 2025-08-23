@@ -89,6 +89,8 @@ int test_seed_derivation(const char *mnemonic, const char *passphrase, const uin
        	print_bytes_as_hex("Expect: ", expected_seed, 64);
         print_bytes_as_hex("Result: ", computed_seed, 64);
 	printf("\n");
+	printf("---------------------------------------------\n");
+    	printf("\n");
 	return !pass;
 }
 
@@ -142,6 +144,8 @@ int test_master_key(const uint8_t *seed, size_t seed_len, const uint8_t *expecte
         print_bytes_as_hex("Expected master chain: ", expected_chain, CHAINCODE_LENGTH);
         print_bytes_as_hex("Got master chain:      ", master.chain_code, CHAINCODE_LENGTH);
     	printf("\n");
+	printf("---------------------------------------------\n");
+    	printf("\n");
 	return !pass;
 }
 
@@ -174,6 +178,8 @@ int test_child_derivation(const key_pair_t *master, const char *path, const uint
  	print_bytes_as_hex("Expected child chain: ", expected_chain, CHAINCODE_LENGTH);
     	print_bytes_as_hex("Got child chain:      ", current.chain_code, CHAINCODE_LENGTH);
     	printf("\n");
+	printf("---------------------------------------------\n");
+	printf("\n");
     	return !pass;
 }
 
@@ -279,6 +285,8 @@ int mnemonic_recovery_test(int nword, const char *passphrase) {
 	print_bytes_as_hex("Generated master key: ", generated_master.key_priv, PRIVKEY_LENGTH);
 	print_bytes_as_hex("Recovered master key: ", recovered_master.key_priv, PRIVKEY_LENGTH);   
 	printf("\n");
+	printf("---------------------------------------------\n");
+	printf("\n");
 	return !pass;
 }
 
@@ -297,48 +305,64 @@ int run_mnemonic_recovery_test() {
 
 
 int test_pub_to_address(const uint8_t *pub_key, const char *expected_address) {
-	char generated_address[ADDRESS_MAX_LEN];
-	int result = pubkey_to_address(pub_key, PUBKEY_LENGTH, generated_address, ADDRESS_MAX_LEN);
-	if (result != 0) {
+	char *generated_address = malloc(ADDRESS_MAX_LEN);
+	if (pubkey_to_address(pub_key, PUBKEY_LENGTH, generated_address, ADDRESS_MAX_LEN)) {
 		fprintf(stderr, "pubkey_to_address() failure\n");
 		return 1;
 	}
 	size_t generated_len = strlen(generated_address);
 	size_t expected_len = strlen(expected_address);
-	int pass = generated_len == expected_len && strncmp(generated_address, expected_address, expected_len) == 0;
+	
+	int pass = (generated_len == expected_len) && (strncmp((const char *)generated_address, (const char *)expected_address, expected_len) == 0);
 	printf("\nPubkey to address test:\n%s\n", pass ? GREEN"[ PASS ]"RESET : RED"[ FAIL ]"RESET);
     	printf("Generated address: %s\n", generated_address);
     	printf("Expected address : %s\n", expected_address);
 	printf("\n");
+	printf("---------------------------------------------\n");
+	printf("\n");
+	free(generated_address);
 	return !pass;
 }
 
 int run_address_generation_test() {
 	int failures = 0;
-
+	// Test 1
 	const char *pub_hex1 = "0279BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798";
 	size_t pub_len1 = strlen(pub_hex1);
 	const char *expected_address1 = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4";
 	uint8_t pub_key1[PUBKEY_LENGTH];
 	hex_to_bytes(pub_hex1, pub_key1, pub_len1);
 	failures += test_pub_to_address(pub_key1, expected_address1);	
-	
+	// Test 2
 	const char *pub_hex2 = "03a1af804ac108a8a51782198c2d034b28bf90c8803f5a53f76276fa69a4eae77f";
 	size_t pub_len2 = strlen(pub_hex2);
 	const char *expected_address2 = "bc1q8zt37uunpakpg8vh0tz06jnj0jz5jddn7ayctz";
 	uint8_t pub_key2[PUBKEY_LENGTH];
 	hex_to_bytes(pub_hex2, pub_key2, pub_len2);
 	failures += test_pub_to_address(pub_key2, expected_address2);
-	
+	// Test 3
+	const char *pub_hex3 = "028ab5778966637820b9afb737e73d2b8f345ac6d44e724fc9a4ca2f9384e50f49";
+	size_t pub_len3 = strlen(pub_hex3);
+	const char *expected_address3 = "bc1qd9c39zfs39utcem4xx0gs9gmkjnjgeasrhyq7j";
+	uint8_t pub_key3[PUBKEY_LENGTH];
+	hex_to_bytes(pub_hex3, pub_key3, pub_len3);
+	failures += test_pub_to_address(pub_key3, expected_address3);
+	// Test 4
+	const char *pub_hex4 = "02001d586501ca904d93853b70036db922a5e9159783c3ff514caa932cb58d6d82";
+	size_t pub_len4 = strlen(pub_hex4);
+	const char *expected_address4 = "bc1qfaer00d4c7dcvdm38fhzmewyjsr022l3jkze2g";
+	uint8_t pub_key4[PUBKEY_LENGTH];
+	hex_to_bytes(pub_hex4, pub_key4, pub_len4);
+	failures += test_pub_to_address(pub_key4, expected_address4);
 	
 	return failures;
 }
  
 int main() {
 	int failures = 0; 
-//	failures += run_mnemonic_test();
-//	failures += run_master_and_child_test(); 
-//	failures += run_mnemonic_recovery_test();
+	failures += run_mnemonic_test();
+	failures += run_master_and_child_test(); 
+	failures += run_mnemonic_recovery_test();
 	failures += run_address_generation_test();
     	printf("Total failures: %d\n", failures);
     	return failures > 0 ? 1 : 0;

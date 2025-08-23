@@ -7,7 +7,6 @@
 #include "mnemonic.h"
 #include "curl/curl.h"
 
-static User user;
 
 void zero(void *buf, size_t size) {
 	memset(buf, 0, size);
@@ -44,27 +43,23 @@ void print_logo() {
 }
 
 int init_user(User *user) {
-	user = gcry_malloc_secure(sizeof(User));
 	if (!user) return -1;
 	zero((void *)user, sizeof(User));
 	zero((void *)user->seed, SEED_LENGTH);
 	user->master_key = NULL;
-	user->child_key_count = 0;
-	user->child_key_capacity = INITIAL_CHILD_CAPACITY;
+	user->child_keys = NULL;
 	user->child_keys = gcry_calloc_secure(INITIAL_CHILD_CAPACITY, sizeof(key_pair_t *));
 	if (!user->child_keys) {
-		if (user->master_key) {
-			zero((void *)user->master_key, sizeof(key_pair_t));
-			gcry_free(user->master_key);
-			user->master_key = NULL;
-		}
-		zero((void *)user->seed, SEED_LENGTH);
-		fprintf(stderr, "Init User() allocation failure\n");
-		return -3;
+		zero((void *)user, sizeof(User));
+		gcry_free(user);
+		user = NULL;
+		return 1;
 	}
 	for (size_t i = 0; i < INITIAL_CHILD_CAPACITY; i++) {
 		user->child_keys[i] = NULL;
 	}
+	user->child_key_count = 0;
+	user->child_key_capacity = INITIAL_CHILD_CAPACITY;
 	return 0;
 }
 
@@ -89,7 +84,7 @@ void free_user(User *user) {
 	}
 	zero((void *)user->seed, SEED_LENGTH);
 	user->child_key_count = 0;
-	user->child_key_count = 0;
+	user->child_key_capacity = 0;
 	gcry_free(user);
 }
 
@@ -117,19 +112,19 @@ Command_Handler c_handlers[] = {
 	{ (char *)"exit", exit_handle}
 };
 
-int32 exit_handle() {
+int32 exit_handle(User *user) {
 	printf("Bye now, bitcoiner!\n");
 	exit(0);
 }
 
-int has_wallet() {
-	if (user.seed[0] != 0) return 1;
+int has_wallet(User *user) {
+	if (user->seed[0] != 0) return 1;
 	return 0; 
 }
 
-int32 new_handle() {
+int32 new_handle(User *user) {
 	char cmd[256];
-	if (has_wallet()) {
+	if (has_wallet(user)) {
 		while (1) {
 			printf("You already have a wallet set in this current account.\n"
 				"Would you like to generate a new one anyways and overwrite the existing one?\n");
@@ -143,7 +138,7 @@ int32 new_handle() {
 				cmd[i] = tolower((unsigned char)cmd[i]);
 				i++;
 			}
-			if (strcmp(cmd, "exit") == 0) exit_handle();
+			if (strcmp(cmd, "exit") == 0) exit_handle(user);
 			if ((strcmp(cmd, "yes") != 0) && (strcmp(cmd, "no") != 0)) {
 				printf("Invalid answer, must type 'yes' or 'no'.\n");
 			} else if (strcmp(cmd, "no") == 0) {
@@ -168,7 +163,7 @@ int32 new_handle() {
 			fprintf(stderr, "fgets() failure\n");
 		}
 		cmd[strlen(cmd) - 1] = '\0';
-		if (strcmp(cmd, "exit") == 0) exit_handle();
+		if (strcmp(cmd, "exit") == 0) exit_handle(user);
 		nword = atoi(cmd);
 		if (nword != 12 && nword != 15 && nword != 18 && nword != 21 && nword != 24) {
 			fprintf(stderr, "\nPlease select a valid number - only 12, 15, 18, 21, 24 allowed");
@@ -190,7 +185,7 @@ int32 new_handle() {
 			cmd[i] = tolower((unsigned char)cmd[i]);
 			i++;
 		}
-		if (strcmp(cmd, "exit") == 0) exit_handle();
+		if (strcmp(cmd, "exit") == 0) exit_handle(user);
 		if ((strcmp(cmd, "yes") != 0) && (strcmp(cmd, "no") != 0)) {
 			printf("\nInvalid answer, must type 'yes' or 'no'\n");
 		} else if (strcmp(cmd, "yes") == 0) {
@@ -213,7 +208,7 @@ int32 new_handle() {
 		}
 	}			
 	int result;
-	result = generate_mnemonic(nword, passphrase, mnemonic, 256, user.seed);
+	result = generate_mnemonic(nword, passphrase, mnemonic, 256, user->seed);
 	if (result != 0) {
 		fprintf(stderr, "Failure generate wallet seed.\n");
 		return 1;
@@ -235,23 +230,23 @@ int32 new_handle() {
 		RED"If you attempt to recover this wallet with only your seed words and the incorrect or blank passphrase,\n"
 		"you will see a completely different wallet, not the one you're about to use to send funds to\n"RESET, nword);
 	}	
-	if (user.master_key) {
-		zero((void *)user.master_key, sizeof(key_pair_t));
-		gcry_free(user.master_key);
-		user.master_key = NULL;	
+	if (user->master_key) {
+		zero((void *)user->master_key, sizeof(key_pair_t));
+		gcry_free(user->master_key);
+		user->master_key = NULL;	
 	}
-	user.master_key = gcry_malloc_secure(sizeof(key_pair_t));
-	if (!user.master_key) {
+	user->master_key = gcry_malloc_secure(sizeof(key_pair_t));
+	if (!user->master_key) {
 		fprintf(stderr, "Failed to allocate master key\n");
-		zero((void *)user.seed, SEED_LENGTH);
+		zero((void *)user->seed, SEED_LENGTH);
 		return 1;
 	}
-	zero((void *)user.master_key, sizeof(key_pair_t));
-	result = generate_master_key(user.seed, SEED_LENGTH, user.master_key);
+	zero((void *)user->master_key, sizeof(key_pair_t));
+	result = generate_master_key(user->seed, SEED_LENGTH, user->master_key);
 	if (result != 0) {
-		zero((void *)user.seed, SEED_LENGTH);
-		gcry_free(user.master_key);
-		user.master_key = NULL;
+		zero((void *)user->seed, SEED_LENGTH);
+		gcry_free(user->master_key);
+		user->master_key = NULL;
 		fprintf(stderr, "Failure generating master key\n");
 		return 1;
 	}
@@ -259,12 +254,12 @@ int32 new_handle() {
 	return 0;
 }
 
-int32 recover_handle() {
+int32 recover_handle(User *user) {
 	char passphrase[256];
 	char mnemonic[256];
 	char cmd[256];
 	int nword;
-	if (has_wallet()) {
+	if (has_wallet(user)) {
 		while (1) {
 			printf("You already have a wallet set in this account\n"
 				"Would you like to recover a new one anyways and overwrite the existing one?\n> ");
@@ -278,7 +273,7 @@ int32 recover_handle() {
 				cmd[i] = tolower((unsigned char)cmd[i]);
 				i++;
 			}
-			if (strcmp(cmd, "exit") == 0) exit_handle();
+			if (strcmp(cmd, "exit") == 0) exit_handle(user);
 			if ((strcmp(cmd, "yes") != 0) && (strcmp(cmd, "no") != 0)) {
 				printf("Invalid answer, must type 'yes' or 'no'.\n");
 			} else if (strcmp(cmd, "no") == 0) {
@@ -304,7 +299,7 @@ int32 recover_handle() {
 			cmd[i] = tolower((unsigned char)cmd[i]);
 			i++;
 		}
-		if (strcmp(cmd, "exit") == 0) exit_handle();
+		if (strcmp(cmd, "exit") == 0) exit_handle(user);
 		nword = atoi(cmd);
 		if (nword != 12 && nword != 15 && nword != 18 && nword != 21 && nword != 24) {
 			fprintf(stderr, "\nPlease select a valid number - only 12, 15, 18, 21, 24 allowed");
@@ -355,7 +350,7 @@ int32 recover_handle() {
 			cmd[i] = tolower((unsigned char)cmd[i]);
 			i++;
 		}
-		if (strcmp(cmd, "exit") == 0) exit_handle();
+		if (strcmp(cmd, "exit") == 0) exit_handle(user);
 		if ((strcmp(cmd, "yes") != 0) && (strcmp(cmd, "no") != 0)) {
 			printf("\nInvalid answer, must type 'yes' or 'no'\n");
 		} else if (strcmp(cmd, "yes") == 0) {
@@ -382,27 +377,27 @@ int32 recover_handle() {
 		fprintf(stderr, "Failure converting mnemonic to seed\n");
 		return 1;
 	}
-	zero((void *)user.seed, SEED_LENGTH);
-	memcpy(user.seed, temp_seed, SEED_LENGTH);
+	zero((void *)user->seed, SEED_LENGTH);
+	memcpy(user->seed, temp_seed, SEED_LENGTH);
 	zero((void *)temp_seed, SEED_LENGTH);
 	printf("Wallet successfully recovered.\n");
-	if (user.master_key) {
-		zero((void *)user.master_key, sizeof(key_pair_t));
-		gcry_free(user.master_key);
-		user.master_key = NULL;	
+	if (user->master_key) {
+		zero((void *)user->master_key, sizeof(key_pair_t));
+		gcry_free(user->master_key);
+		user->master_key = NULL;	
 	}
-	user.master_key = gcry_malloc_secure(sizeof(key_pair_t));
-	if (!user.master_key) {
+	user->master_key = gcry_malloc_secure(sizeof(key_pair_t));
+	if (!user->master_key) {
 		fprintf(stderr, "Failed to allocate master key\n");
-		zero((void *)user.seed, SEED_LENGTH);
+		zero((void *)user->seed, SEED_LENGTH);
 		return 1;
 	}
-	zero((void *)user.master_key, sizeof(key_pair_t));
-	result = generate_master_key(user.seed, SEED_LENGTH, user.master_key);
+	zero((void *)user->master_key, sizeof(key_pair_t));
+	result = generate_master_key(user->seed, SEED_LENGTH, user->master_key);
 	if (result != 0) {
-		zero((void *)user.seed, SEED_LENGTH);
-		gcry_free(user.master_key);
-		user.master_key = NULL;
+		zero((void *)user->seed, SEED_LENGTH);
+		gcry_free(user->master_key);
+		user->master_key = NULL;
 		fprintf(stderr, "Failure generating master key\n");
 		return 1;
 	}
@@ -410,8 +405,8 @@ int32 recover_handle() {
 	return 0;
 }
 
-int32 balance_handle() {
-	if (!has_wallet()) {
+int32 balance_handle(User *user) {
+	if (!has_wallet(user)) {
 		printf("No wallet available for this command. Please generate a new wallet or recover your existing one.\n"
 		"Type 'new' or 'recover' to begin\n");
 		return 1;
@@ -422,67 +417,87 @@ int32 balance_handle() {
 	return 0;
 }
 
-int32 receive_handle() {
-	if (!has_wallet()) {
+int32 receive_handle(User *user) {
+	if (!has_wallet(user)) {
 		printf("No wallet available for this command. Please generate a new wallet or recover your existing one.\n"
 		"Type 'new' or 'recover' to begin\n");
 		return 1;
 	}
 	// Work our way down the path to m/44'/0'/0'/0
 	key_pair_t *account_key = NULL;
-	int result = derive_child_key(user.master_key, 0x80000000 | 44, account_key); // m/44'
+	account_key = gcry_malloc_secure(sizeof(key_pair_t));
+	if (!account_key) {
+		fprintf(stderr, "Error gcry malloc for child key\n");
+	}
+	int result = derive_child_key(user->master_key, 0x80000000 | 44, account_key); // m/44'
 	if (result != 0) {
 		fprintf(stderr, "Failed to derive purpose key\n");
 		return 1;
 	}
+	
 	key_pair_t *coin_key = NULL;
+	coin_key = gcry_malloc_secure(sizeof(key_pair_t));
+	if (!coin_key) {
+		fprintf(stderr, "Error gcry malloc for child key\n");
+	}
 	result = derive_child_key(account_key, 0x80000000 | 0, coin_key); // m/44'/0'
 	if (result != 0) {
 		fprintf(stderr, "Failed to derive coin key\n");
 		return 1;
 	}
+	
 	key_pair_t *account0_key = NULL;
+	account0_key = gcry_malloc_secure(sizeof(key_pair_t));
+	if (!account0_key) {
+		fprintf(stderr, "Error gcry malloc for child key\n");
+		return 1;
+	}
 	result = derive_child_key(coin_key, 0x80000000 | 0, account0_key); // m/44'/0'/0'
 	if (result != 0) {
 		fprintf(stderr, "Failed to derive account 0 key\n");
 		return 1;
 	}
-	// Generate up to 20 child keys (external chain: m/44'/0'/0'/0)
-	for (uint32_t i = user.child_key_count; i < GAP_LIMIT && i < user.child_key_capacity; i++) {
-		key_pair_t *child_key = NULL;
-		result = derive_child_key(account0_key, i, child_key); // m/44'/0'/0'/0/i
-		if (result != 0) {
-			fprintf(stderr, "Failed to derive child key %u\n", i);
-			continue;
-		}
-		// Resize child keys dynamic array if needed
-		if (user.child_key_count >= user.child_key_capacity) {
-			user.child_key_capacity *= 2;
-			user.child_keys = gcry_realloc(user.child_keys, 
-					user.child_key_capacity * sizeof(key_pair_t *));
-			if (!user.child_keys) {
-				zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
-				zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
-				zero_and_gcry_free((void *)coin_key, sizeof(key_pair_t));
-				zero_and_gcry_free((void *)account0_key, sizeof(key_pair_t));
-				fprintf(stderr, "Failure to resize child_keys dynamic array.\n");
-				return 1;
-			}
-			for (size_t j = user.child_key_count; j < user.child_key_capacity; j++) {
-				user.child_keys[j] = NULL;
-			}	
-		}
-		user.child_keys[user.child_key_count++] = child_key;
+	// Generate a new child key at the next available index (external chain: m/44'/0'/0'/0)
+	uint32_t i = user->child_key_count;
+	key_pair_t *child_key = NULL;
+	child_key = gcry_malloc(sizeof(key_pair_t));
+	if (!child_key) {
+		fprintf(stderr, "Error gcry malloc child key\n");
+		return 1;
 	}
+	result = derive_child_key(account0_key, i, child_key); // m/44'/0'/0'/0/i
+	if (result != 0) {
+		fprintf(stderr, "Failed to derive child key %d\n", i);
+		return 1;
+	}
+	// Resize child keys dynamic array if needed
+	if (user->child_key_count >= user->child_key_capacity) {
+		user->child_key_capacity *= 2;
+		user->child_keys = gcry_realloc(user->child_keys, 
+				user->child_key_capacity * sizeof(key_pair_t *));
+		if (!user->child_keys) {
+			zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
+			zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
+			zero_and_gcry_free((void *)coin_key, sizeof(key_pair_t));
+			zero_and_gcry_free((void *)account0_key, sizeof(key_pair_t));
+			fprintf(stderr, "Failure to resize child_keys dynamic array.\n");
+			return 1;
+		}
+		for (size_t j = user->child_key_count; j < user->child_key_capacity; j++) {
+			user->child_keys[j] = NULL;
+		}	
+	}
+	user->child_keys[user->child_key_count] = child_key;
+	user->child_key_count++;
 	// Use the last generated child key for receive address
-	if (user.child_key_count == 0) {
+	if (user->child_key_count == 0) {
 		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
 		zero_and_gcry_free((void *)coin_key, sizeof(key_pair_t));
 		zero_and_gcry_free((void *)account0_key, sizeof(key_pair_t));
 		fprintf(stderr, "No child keys available.\n");
 		return 1;
 	}
-	key_pair_t *receive_key = user.child_keys[user.child_key_count - 1];
+	key_pair_t *receive_key = user->child_keys[user->child_key_count - 1];
 	char address[ADDRESS_MAX_LEN];
 	result = pubkey_to_address(receive_key->key_pub_compressed, PUBKEY_LENGTH, address, ADDRESS_MAX_LEN);
 	if (result != 0) {
@@ -505,8 +520,8 @@ int32 receive_handle() {
 	return 0;
 }
 
-int32 send_handle() {
-	if (!has_wallet()) {
+int32 send_handle(User *user) {
+	if (!has_wallet(user)) {
 		printf("No wallet available for this command. Please generate a new wallet or recover your existing one.\n"
 		"Type 'new' or 'recover' to begin\n");
 		return 1;
@@ -514,11 +529,11 @@ int32 send_handle() {
 	return 0;
 }
 
-int32 help_handle() {
+int32 help_handle(User *user) {
 	return 0;
 }
 
-int32 menu_handle() {
+int32 menu_handle(User *user) {
 	print_commands();
 	return 0;
 }
@@ -536,7 +551,7 @@ Callback get_command(const char *cmd) {
 	return NULL;
 }
 
-void main_loop() {
+void main_loop(User *user) {
 	char buf[256], cmd[256];
 	while (1) {
 		zero_multiple(buf, cmd, NULL);	
@@ -555,20 +570,22 @@ void main_loop() {
 			printf("Invalid command\n");
 			continue;
 		}
-		cb();
+		cb(user);
 	}
 }
 
 int main() {
+	User *user;
+	user = (User *)gcry_malloc(sizeof(User));
 	print_logo();
 	init_gcrypt();
-	int result = init_user(&user);
+	int result = init_user(user);
 	if (result != 0) {
 		fprintf(stderr, "User secured allocation and setup failed.\n");
 		return 1;
 	}
 	print_commands();
-	main_loop();
-	free_user(&user);
+	main_loop(user);
+	free_user(user);
 	return 0;
 }

@@ -145,7 +145,6 @@ void convert_bits(uint8_t *out, size_t *outlen, const uint8_t *in, size_t inlen,
 }
 
 static uint32_t bech32_polymod(const uint8_t *values, size_t len) {
-//printf("Size of values: %ld\n", len);
     static const uint32_t gen[] = {0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3};
     uint32_t chk = 1;
     for (size_t i = 0; i < len; i++) {
@@ -160,16 +159,15 @@ static uint32_t bech32_polymod(const uint8_t *values, size_t len) {
 // Convert compressed pub to P2WPKH (Segwit) address
 int pubkey_to_address(const uint8_t *pub_key, size_t pub_key_len, char *address, size_t address_len) {
 	if (pub_key_len != PUBKEY_LENGTH || !address) return -1;
+printf("\n");
 print_bytes_as_hex("Original pub key (33 bytes)", pub_key, pub_key_len);
 	// Compute SHA256
 	uint8_t sha256[32];
 	gcry_md_hash_buffer(GCRY_MD_SHA256, sha256, pub_key, pub_key_len);
-print_bytes_as_hex("After SHA256", sha256, 32);
 	// Compute RIPEMD160
 	uint8_t ripemd160[20];
 	gcry_md_hash_buffer(GCRY_MD_RMD160, ripemd160, sha256, 32);
 print_bytes_as_hex("After RIPEMD160 (PubKeyHash) (20 bytes)", ripemd160, 20);
-	// Successfully created a P2WPKH scriptPubKey (PubKeyHash)
 	// Convert PubKeyHash to 5-bit groups
 	uint8_t program_values[BECH32_VALUES_MAX];
 	size_t program_values_len;
@@ -178,16 +176,18 @@ print_bytes_as_hex("After RIPEMD160 (PubKeyHash) (20 bytes)", ripemd160, 20);
 		fprintf(stderr, "Unexpected program length: %zu\n", program_values_len);
 		return 1;
 	}
+	// Finish creating ScriptPubKey
 	// Data values = version (5-bit) + program_values
 	uint8_t data_values[BECH32_VALUES_MAX];
 	data_values[0] = 0;
 	memcpy(data_values + 1, program_values, program_values_len);
 	size_t data_values_len = 1 + program_values_len;
 
+
 	// Add HRP and compute checksum
 	const char *hrp = "bc"; // Mainnet, use 'tb' for testnet
 	size_t hrp_len = strlen(hrp);
-	size_t check_values_len = data_values_len + hrp_len * 2 + 1; // 1 for separator
+	size_t check_values_len = data_values_len + hrp_len * 2 + 7; // 1 for separator, 6 for '0' padding
 	uint8_t *check_values = gcry_malloc_secure(check_values_len);
 	if (!check_values) return 1;
 	
@@ -340,11 +340,18 @@ int generate_master_key(const uint8_t *seed, size_t seed_len, key_pair_t *master
 	memcpy(master->key_priv_extended + PRIVKEY_LENGTH, master->chain_code, CHAINCODE_LENGTH);
 	// Generate master public key
 	if (generate_public_key(master->key_priv, master->key_pub_compressed) != 0) {
+		fprintf(stderr, "Failure generating compressed public key\n");
 		return 1;
 	}
 	memcpy(master->key_pub_extended, master->key_pub_compressed, PUBKEY_LENGTH);
 	memcpy(master->key_pub_extended + PUBKEY_LENGTH, master->chain_code, CHAINCODE_LENGTH);
 	master->key_index = 0; // Master is at depth 0
+/*
+print_bytes_as_hex("Master Priv    ", master->key_priv, PRIVKEY_LENGTH);
+print_bytes_as_hex("Chain Code     ", master->chain_code, CHAINCODE_LENGTH);
+print_bytes_as_hex("Compressed Pub ", master->key_pub_compressed, PUBKEY_LENGTH);
+print_bytes_as_hex("Extended Pub   ", master->key_pub_extended, PUBKEY_LENGTH + CHAINCODE_LENGTH);
+*/
 	return 0;
 }
 
@@ -380,9 +387,7 @@ int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child
     	// IL = child offset (left 32 bytes) that's used to generate child private key, IR = child_chain_code (right 32 bytes)
     	uint8_t il[PRIVKEY_LENGTH];
     	memcpy(il, hmac_output, PRIVKEY_LENGTH);
-	memset(child->chain_code, 0, CHAINCODE_LENGTH);
     	memcpy(child->chain_code, hmac_output + PRIVKEY_LENGTH, CHAINCODE_LENGTH);
-
 	gcry_error_t err;
     	gcry_mpi_t parent_priv_mpi, il_mpi, n_mpi, child_priv_mpi;
 	err = gcry_mpi_scan(&parent_priv_mpi, GCRYMPI_FMT_USG, parent->key_priv, PRIVKEY_LENGTH, NULL);
@@ -413,7 +418,7 @@ int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child
 
 	// Generate child private key
     	size_t written;
-	memset(child->key_priv, 0, PRIVKEY_LENGTH);
+//	memset(child->key_priv, 0, PRIVKEY_LENGTH);
 	if (gcry_mpi_print(GCRYMPI_FMT_USG, child->key_priv, PRIVKEY_LENGTH, &written, child_priv_mpi) != 0) {
        		gcry_mpi_release(child_priv_mpi);
         	return 1;
@@ -421,18 +426,21 @@ int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child
     	gcry_mpi_release(child_priv_mpi);
 
     	// Generate child public key
-	memset(child->key_pub_compressed, 0, PUBKEY_LENGTH);
     	if (generate_public_key(child->key_priv, child->key_pub_compressed) != 0) {
+		fprintf(stderr, "Error generating public key for child\n");
         	return 1;
     	}
 	// Update extended keys
-	memset(child->key_priv_extended, 0, PRIVKEY_LENGTH + CHAINCODE_LENGTH);
     	memcpy(child->key_priv_extended, child->key_priv, PRIVKEY_LENGTH);
     	memcpy(child->key_priv_extended + PRIVKEY_LENGTH, child->chain_code, CHAINCODE_LENGTH);
-	memset(child->key_pub_extended, 0, PUBKEY_LENGTH + CHAINCODE_LENGTH);
     	memcpy(child->key_pub_extended, child->key_pub_compressed, PUBKEY_LENGTH);
     	memcpy(child->key_pub_extended + PUBKEY_LENGTH, child->chain_code, CHAINCODE_LENGTH); 
 	child->key_index = index & 0xFF;
+/*
+print_bytes_as_hex("Child Priv Extended    ", child->key_priv_extended, PRIVKEY_LENGTH + CHAINCODE_LENGTH);
+print_bytes_as_hex("Child Pub Compressed   ", child->key_pub_compressed, PUBKEY_LENGTH);
+print_bytes_as_hex("Child Pub Extended     ", child->key_pub_extended, PUBKEY_LENGTH + CHAINCODE_LENGTH);
+*/
 	return 0;
 }
 
