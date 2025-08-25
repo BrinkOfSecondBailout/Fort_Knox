@@ -30,6 +30,10 @@ typedef struct {
 	size_t size;
 } curl_buffer_t;
 
+void zero(void *, size_t);
+void zero_multiple(void *, ...);
+void zero_and_gcry_free(void *, size_t);
+void zero_and_gcry_free_multiple(size_t, void *, ...);
 void hex_to_bytes(const char *, uint8_t *, size_t);
 void resize_convert_hex_to_bytes(const char *, uint8_t *);
 void print_bytes_as_hex(const char *, const uint8_t *, size_t);
@@ -38,6 +42,7 @@ void print_master_priv_key_hashed(const uint8_t *, size_t);
 int pubkey_to_address(const uint8_t *, size_t, char *, size_t);
 int generate_master_key(const uint8_t *seed, size_t, key_pair_t *);
 int derive_child_key(const key_pair_t *, uint32_t, key_pair_t *);
-long long get_account_balance(key_pair_t *, uint32_t, int);
+int derive_from_public_to_account(const key_pair_t *, uint32_t, key_pair_t *);
+long long get_account_balance(key_pair_t *, uint32_t, size_t, time_t*);
 
 #endif

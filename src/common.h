@@ -12,6 +12,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <ctype.h>
+#include <time.h>
 
 #define RED "\x1B[31m"
 #define GREEN "\x1B[32m"

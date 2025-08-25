@@ -7,28 +7,6 @@
 #include "mnemonic.h"
 #include "curl/curl.h"
 
-
-void zero(void *buf, size_t size) {
-	memset(buf, 0, size);
-	return;
-}
-
-void zero_multiple(void *buf, ...) {
-	va_list args;
-	va_start(args, buf);
-	void *ptr;
-	while ((ptr = va_arg(args, void *)) != NULL) {
-		zero(ptr, sizeof(*ptr));
-	}
-	va_end(args);
-}
-
-void zero_and_gcry_free(void *buf, size_t size) {
-	if (!buf) return;
-	zero(buf, size);
-	gcry_free(buf);
-}
-
 void print_logo() {
 	FILE *logo = fopen("logo.txt", "r");
 	char buffer[1024];
@@ -60,6 +38,7 @@ int init_user(User *user) {
 	}
 	user->child_key_count = 0;
 	user->child_key_capacity = INITIAL_CHILD_CAPACITY;
+	user->last_api_request = 0;
 	return 0;
 }
 
@@ -85,6 +64,7 @@ void free_user(User *user) {
 	zero((void *)user->seed, SEED_LENGTH);
 	user->child_key_count = 0;
 	user->child_key_capacity = 0;
+	user->last_api_request = 0;
 	gcry_free(user);
 }
 
@@ -178,6 +158,7 @@ int32 new_handle(User *user) {
 		zero((void *)passphrase, sizeof(passphrase));
 		if (!fgets(cmd, sizeof(cmd), stdin)) {
 			fprintf(stderr, "fgets() failure\n");
+			return 1;
 		}
 		cmd[strlen(cmd) - 1] = '\0';
 		int i = 0;
@@ -266,6 +247,7 @@ int32 recover_handle(User *user) {
 			zero((void *)cmd, sizeof(cmd));
 			if (!fgets(cmd, sizeof(cmd), stdin)) {
 				fprintf(stderr, "fgets() failure\n");
+				return 1;
 			}
 			cmd[strlen(cmd) - 1] = '\0';
 			int i = 0;
@@ -292,6 +274,7 @@ int32 recover_handle(User *user) {
 		zero((void *)cmd, sizeof(cmd));
 		if (!fgets(cmd, sizeof(cmd), stdin)) {
 			fprintf(stderr, "fgets() failure\n");
+			return 1;
 		}
 		cmd[strlen(cmd) - 1] = '\0';
 		int i = 0;
@@ -314,6 +297,7 @@ int32 recover_handle(User *user) {
 		zero((void *)mnemonic, sizeof(mnemonic));
 		if (!fgets(mnemonic, sizeof(mnemonic), stdin)) {
 			fprintf(stderr, "fgets() failure\n");
+			return 1;
 		}
 		mnemonic[strlen(mnemonic) - 1] = '\0';
 		size_t mnemonic_len = strlen(mnemonic);
@@ -343,6 +327,7 @@ int32 recover_handle(User *user) {
 		zero((void *)passphrase, sizeof(passphrase));
 		if (!fgets(cmd, sizeof(cmd), stdin)) {
 			fprintf(stderr, "fgets() failure\n");
+			return 1;
 		}
 		cmd[strlen(cmd) - 1] = '\0';
 		int i = 0;
@@ -361,6 +346,7 @@ int32 recover_handle(User *user) {
 				"> ", nword + 1);
 			if (!fgets(passphrase, sizeof(passphrase), stdin)) {
 				fprintf(stderr, "fgets() failure\n");
+				return 1;
 			}
 			passphrase[strlen(passphrase) - 1] = '\0';
 			printf("\nPassphrase successfully included..");
@@ -411,8 +397,39 @@ int32 balance_handle(User *user) {
 		"Type 'new' or 'recover' to begin\n");
 		return 1;
 	}
-	curl_global_init(CURL_GLOBAL_DEFAULT);
+	char cmd[256];
+	uint32_t account_index = 0;
+	printf("Do you have a preference on what account to see the balance of?\n"
+		RED"We recommend keeping it at 0 as per the BIP44 standard,\n"RESET 
+		"but enter any number you wish\n"
+		"Keep in mind that this balance will only reflect this particular account you choose.\n"
+		"> ");
+	if (!fgets(cmd, sizeof(cmd), stdin)) {
+		fprintf(stderr, "fgets failure\n");
+		return 1;
+	}
+	cmd[strlen(cmd) - 1] = '\0';
+	int j = 0;
+	while (cmd[j] != '\0') {
+		cmd[j] = tolower((unsigned char)cmd[j]);
+		j++;
+	}
+	if (strcmp(cmd, "exit") == 0) exit_handle(user);
+	account_index = (uint32_t)atoi(cmd);
 
+	// Work our way down the path to m/44'/0'/0'/account
+	key_pair_t *account_key;
+	account_key = gcry_malloc_secure(sizeof(key_pair_t));
+	int result = derive_from_public_to_account(user->master_key, account_index, account_key);
+	if (result != 0) {
+		fprintf(stderr, "Failed to derive account key\n");
+		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
+		return 1;
+	}
+
+	curl_global_init(CURL_GLOBAL_DEFAULT);
+	time_t *last_request = &user->last_api_request;
+	long long balance = get_account_balance(user->master_key, (uint32_t)0, user->child_key_count, last_request);
 	curl_global_cleanup();
 	return 0;
 }
@@ -423,51 +440,63 @@ int32 receive_handle(User *user) {
 		"Type 'new' or 'recover' to begin\n");
 		return 1;
 	}
-	// Work our way down the path to m/44'/0'/0'/0
-	key_pair_t *account_key = NULL;
+	char cmd[256];
+	uint32_t account_index = 0;
+	printf("Do you have a preference on what account to use?\n"
+		"We recommend keeping it at 0 as per the BIP44 standard, but enter any number you wish\n"
+		"Keep in mind that whichever account you use here must be noted so that any funds sent\n"
+		"will have to be queried by choosing this particular account number\n"
+		RED"This is why we recommend you keeping it at 0 by default.\n"RESET
+		"> ");
+	if (!fgets(cmd, sizeof(cmd), stdin)) {
+		fprintf(stderr, "fgets failure\n");
+		return 1;
+	}
+	cmd[strlen(cmd) - 1] = '\0';
+	int j = 0;
+	while (cmd[j] != '\0') {
+		cmd[j] = tolower((unsigned char)cmd[j]);
+		j++;
+	}
+	if (strcmp(cmd, "exit") == 0) exit_handle(user);
+	account_index = (uint32_t)atoi(cmd);
+
+	// Work our way down the path to m/44'/0'/0'/account
+	key_pair_t *account_key;
 	account_key = gcry_malloc_secure(sizeof(key_pair_t));
-	if (!account_key) {
-		fprintf(stderr, "Error gcry malloc for child key\n");
-	}
-	int result = derive_child_key(user->master_key, 0x80000000 | 44, account_key); // m/44'
+	int result = derive_from_public_to_account(user->master_key, account_index, account_key);
 	if (result != 0) {
-		fprintf(stderr, "Failed to derive purpose key\n");
+		fprintf(stderr, "Failed to derive account key\n");
+		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
 		return 1;
 	}
-	
-	key_pair_t *coin_key = NULL;
-	coin_key = gcry_malloc_secure(sizeof(key_pair_t));
-	if (!coin_key) {
-		fprintf(stderr, "Error gcry malloc for child key\n");
+	// Continue deriving at change 0
+	key_pair_t *change_key;
+	change_key = gcry_malloc_secure(sizeof(key_pair_t));
+	if (!change_key) {
+		fprintf(stderr, "Error gcry malloc change key\n");
+		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
+		return 1;
 	}
-	result = derive_child_key(account_key, 0x80000000 | 0, coin_key); // m/44'/0'
+	result = derive_child_key(account_key, 0, change_key);
 	if (result != 0) {
-		fprintf(stderr, "Failed to derive coin key\n");
+		fprintf(stderr, "Failed to derive change key\n");
+		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);	
 		return 1;
-	}
-	
-	key_pair_t *account0_key = NULL;
-	account0_key = gcry_malloc_secure(sizeof(key_pair_t));
-	if (!account0_key) {
-		fprintf(stderr, "Error gcry malloc for child key\n");
-		return 1;
-	}
-	result = derive_child_key(coin_key, 0x80000000 | 0, account0_key); // m/44'/0'/0'
-	if (result != 0) {
-		fprintf(stderr, "Failed to derive account 0 key\n");
-		return 1;
-	}
-	// Generate a new child key at the next available index (external chain: m/44'/0'/0'/0)
+	} 
+	// Generate a new child key at the next available index (external chain: m/44'/0'/0'/account'/0/i)
 	uint32_t i = user->child_key_count;
 	key_pair_t *child_key = NULL;
-	child_key = gcry_malloc(sizeof(key_pair_t));
+	child_key = gcry_malloc_secure(sizeof(key_pair_t));
 	if (!child_key) {
 		fprintf(stderr, "Error gcry malloc child key\n");
+		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);	
 		return 1;
 	}
-	result = derive_child_key(account0_key, i, child_key); // m/44'/0'/0'/0/i
+	result = derive_child_key(change_key, i, child_key); // m/44'/0'/0'/account'/0/i
 	if (result != 0) {
 		fprintf(stderr, "Failed to derive child key %d\n", i);
+		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);	
 		return 1;
 	}
 	// Resize child keys dynamic array if needed
@@ -476,10 +505,7 @@ int32 receive_handle(User *user) {
 		user->child_keys = gcry_realloc(user->child_keys, 
 				user->child_key_capacity * sizeof(key_pair_t *));
 		if (!user->child_keys) {
-			zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
-			zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
-			zero_and_gcry_free((void *)coin_key, sizeof(key_pair_t));
-			zero_and_gcry_free((void *)account0_key, sizeof(key_pair_t));
+			zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);	
 			fprintf(stderr, "Failure to resize child_keys dynamic array.\n");
 			return 1;
 		}
@@ -489,28 +515,22 @@ int32 receive_handle(User *user) {
 	}
 	user->child_keys[user->child_key_count] = child_key;
 	user->child_key_count++;
-	// Use the last generated child key for receive address
 	if (user->child_key_count == 0) {
-		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
-		zero_and_gcry_free((void *)coin_key, sizeof(key_pair_t));
-		zero_and_gcry_free((void *)account0_key, sizeof(key_pair_t));
+		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);	
 		fprintf(stderr, "No child keys available.\n");
 		return 1;
 	}
+	// Use the last generated child key for receive address
 	key_pair_t *receive_key = user->child_keys[user->child_key_count - 1];
 	char address[ADDRESS_MAX_LEN];
 	result = pubkey_to_address(receive_key->key_pub_compressed, PUBKEY_LENGTH, address, ADDRESS_MAX_LEN);
 	if (result != 0) {
-		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
-		zero_and_gcry_free((void *)coin_key, sizeof(key_pair_t));
-		zero_and_gcry_free((void *)account0_key, sizeof(key_pair_t));
+		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);	
 		fprintf(stderr, "Failed to generate receive address.\n");
 		return 1;
 	}
 	// Clean up intermediate keys
-	zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
-	zero_and_gcry_free((void *)coin_key, sizeof(key_pair_t));
-	zero_and_gcry_free((void *)account0_key, sizeof(key_pair_t));
+	zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);	
 	// New receive address
 	printf("New receive address: %s\n", address);
 	printf("Use this adddress to receive Bitcoin. You can:\n"

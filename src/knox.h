@@ -14,6 +14,7 @@ typedef struct {
 	key_pair_t **child_keys;
 	size_t child_key_count;
 	size_t child_key_capacity;
+	time_t last_api_request;
 } User;
 
 typedef int32 (*Callback)(User *user);
