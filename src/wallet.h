@@ -6,6 +6,7 @@
 
 #define N_VALUE_HEX "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141"
 
+#define INITIAL_CHILD_KEY_CAPACITY 20
 #define SEED_LENGTH 64
 #define PRIVKEY_LENGTH 32
 #define CHAINCODE_LENGTH 32
@@ -26,6 +27,13 @@ struct key_pair {
 };
 
 typedef struct {
+	uint32_t account_index;
+	key_pair_t **child_keys;
+	size_t child_key_count;
+	size_t child_key_capacity;
+} account_t;
+
+typedef struct {
 	char *data;
 	size_t size;
 } curl_buffer_t;
@@ -43,6 +51,6 @@ int pubkey_to_address(const uint8_t *, size_t, char *, size_t);
 int generate_master_key(const uint8_t *seed, size_t, key_pair_t *);
 int derive_child_key(const key_pair_t *, uint32_t, key_pair_t *);
 int derive_from_public_to_account(const key_pair_t *, uint32_t, key_pair_t *);
-long long get_account_balance(key_pair_t *, uint32_t, size_t, time_t*);
+long long get_account_balance(key_pair_t *, account_t **, size_t, time_t*);
 
 #endif

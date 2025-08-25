@@ -4,16 +4,16 @@
 #define KNOX_H
 #include "wallet.h"
 
-#define INITIAL_CHILD_CAPACITY 20
+#define INITIAL_ACCOUNTS_CAPACITY 5
 
 typedef unsigned int int32;
 
 typedef struct {
 	uint8_t seed[SEED_LENGTH];
 	key_pair_t *master_key;
-	key_pair_t **child_keys;
-	size_t child_key_count;
-	size_t child_key_capacity;
+	account_t **accounts;
+	size_t accounts_count;
+	size_t accounts_capacity;
 	time_t last_api_request;
 } User;
 
