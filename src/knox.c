@@ -105,12 +105,13 @@ account_t *add_account_to_user(User *user, uint32_t account_index) {
 	account_t *new_account = (account_t *)gcry_malloc_secure(sizeof(account_t));
 	new_account->account_index = account_index;
 	// Initialize child keys for account
-	key_pair_t *child_keys = gcry_calloc_secure(INITIAL_CHILD_KEY_CAPACITY, sizeof(key_pair_t *));
+	key_pair_t **child_keys = gcry_calloc_secure(INITIAL_CHILD_KEY_CAPACITY, sizeof(key_pair_t *));
 	if (!child_keys) {
 		zero((void *)user->accounts, sizeof(user->accounts_capacity));
 		return NULL;
 	}
 	zero((void *)child_keys, INITIAL_CHILD_KEY_CAPACITY * sizeof(key_pair_t*));
+	new_account->child_keys = child_keys;
 	new_account->child_key_count = 0;
 	new_account->child_key_capacity = INITIAL_CHILD_KEY_CAPACITY;
 	// Add account to user accounts
@@ -517,10 +518,10 @@ int32 receive_handle(User *user) {
 			j++;
 		}
 		if (strcmp(cmd, "exit") == 0) exit_handle(user);
-		account_index = (uint32_t)atoi(cmd);
-		if (account_index > (uint32_t) 5) {
+		if (atoi(cmd) > 5) {
 			fprintf(stderr, "Maximum account index for this program is 5. Enter a number from 0 to 5.\n");
 		} else {
+			account_index = (uint32_t)atoi(cmd);
 			break;
 		}
 	}
@@ -532,6 +533,10 @@ int32 receive_handle(User *user) {
 	// Work our way down the path to m/44'/0'/0'/account
 	key_pair_t *account_key;
 	account_key = gcry_malloc_secure(sizeof(key_pair_t));
+	if (!account_key) {
+		fprintf(stderr, "Error gcry_malloc_secure\n");
+		return 1;
+	}
 	int result = derive_from_public_to_account(user->master_key, account_index, account_key);
 	if (result != 0) {
 		fprintf(stderr, "Failed to derive account key\n");
