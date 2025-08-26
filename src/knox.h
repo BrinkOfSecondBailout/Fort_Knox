@@ -4,7 +4,6 @@
 #define KNOX_H
 #include "wallet.h"
 
-#define INITIAL_ACCOUNTS_CAPACITY 5
 
 typedef unsigned int int32;
 

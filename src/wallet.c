@@ -475,9 +475,29 @@ int generate_address(const uint8_t *key_pub_compressed, char *address, size_t ad
     	return 0;
 }
 
+int derive_from_change_to_child(const key_pair_t *change_key, uint32_t child_index, key_pair_t *child_key) {
+	// Derive from change to child - m/44'/0'/0'/account/change/index
+	int result = derive_child_key(change_key, child_index, child_key); // m/44'/0'/account'/change/index
+	if (result != 0) {
+		fprintf(stderr, "Failed to derive index key\n");
+		return -1;
+	}
+	return 0;
+}
+
+int derive_from_account_to_change(const key_pair_t *account_key, uint32_t change_index, key_pair_t *change_key) {
+	// Derive from account to change - m/44'/0'/0'/account/change/
+	int result = derive_child_key(account_key, change_index, change_key); // m'/44'/0'/account'/change	
+	if (result != 0) {
+		fprintf(stderr, "Failure deriving child key\n");
+		return -1;
+	}
+	return 0;
+}
+
 // Derive from public key all the way up to account - m/purpose'/coin'/account'/
 int derive_from_public_to_account(const key_pair_t *pub_key, uint32_t account_index, key_pair_t *account_key) {
-	// Work our way down the path to m/44'/0'/0'/0
+	// Derive from public to account - m/44'/0'/0'/account
 	key_pair_t *purpose_key = NULL;
 	purpose_key = gcry_malloc_secure(sizeof(key_pair_t));
 	if (!purpose_key) {
@@ -597,26 +617,29 @@ printf("Addr_List: %s\n", addr_list);
 	return total_balance;
 }
 
-long long get_account_balance(key_pair_t *master_key, account_t **accounts_array, size_t account_count, time_t *last_request) {
-	char **addresses = gcry_malloc_secure(account_count * GAP_LIMIT * 2 * sizeof(char *)); // 42 bytes per address (including comma) * 2 chains
+long long get_account_balance(key_pair_t *master_key, time_t *last_request) {
+	char **addresses = NULL;
+	addresses = gcry_malloc_secure(ACCOUNTS_CAPACITY * GAP_LIMIT * 2 * sizeof(char *)); // 42 bytes per address (including comma) * 2 chains
 	if (!addresses) {
 		fprintf(stderr, "Failed to allocate addresses array\n");
 		return -1;
 	}
-	for (int i = 0; i < GAP_LIMIT * 2; i++) {
-		// Allocate each of the 40 addresses and NULL it
-		addresses[i] = gcry_malloc_secure(ADDRESS_MAX_LEN);
-		if (!addresses[i]) {
+	for (size_t i = 0; i < ACCOUNTS_CAPACITY * GAP_LIMIT * 2; i++) {
+		// Allocate each of the 200 addresses and NULL it
+		char *address = (char *)gcry_malloc_secure(sizeof(char) * ADDRESS_MAX_LEN);
+		if (address == NULL) {
 			for (int j = 0; j < i; j++) gcry_free(addresses[j]);
 			gcry_free(addresses);
+			fprintf(stderr, "Error allocating address\n");
 			return -1;
 		}
-		addresses[i][0] = '\0';
+		address[0] = '\0';
+		addresses[i] = address;
 	}
 	int addr_count = 0;
+	int result;
 	// For each account index
-	for (size_t i = 0; i < account_count; i++) {
-		uint32_t account_index = accounts_array[i]->account_index;
+	for (uint32_t account_index = 0; account_index < ACCOUNTS_CAPACITY; account_index++) {
 		key_pair_t *account_key = NULL;
 		account_key = gcry_malloc_secure(sizeof(key_pair_t));
 		if (!account_key) {
@@ -625,7 +648,7 @@ long long get_account_balance(key_pair_t *master_key, account_t **accounts_array
 			gcry_free(addresses);
 			return -1;
 		}
-		int result = derive_from_public_to_account(master_key, account_index, account_key); 
+		result = derive_from_public_to_account(master_key, account_index, account_key); 
 		if (result != 0) {
 			fprintf(stderr, "Failure deriving account key\n");
 			for (int j = 0; j < addr_count; j++) gcry_free(addresses[j]);
@@ -641,9 +664,10 @@ long long get_account_balance(key_pair_t *master_key, account_t **accounts_array
 				fprintf(stderr, "Error gcry_malloc_secure\n");
 				for (int j = 0; j < addr_count; j++) gcry_free(addresses[j]);
 				gcry_free(addresses);
+				zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
 				return -1;
 			}
-			result = derive_child_key(account_key, change, change_key); // m'/44'/0'/account'/change	
+			result = derive_from_account_to_change(account_key, change, change_key); // m'/44'/0'/account'/change	
 			if (result != 0) {
 				fprintf(stderr, "Failure deriving child key\n");
 				for (int j = 0; j < addr_count; j++) gcry_free(addresses[j]);
@@ -652,55 +676,42 @@ long long get_account_balance(key_pair_t *master_key, account_t **accounts_array
 				return -1;
 			}
 			// For each change (chain), go through all the indexes
-			for (size_t j = 0; j < accounts_array[i]->child_key_capacity && j < GAP_LIMIT; j++) {
+			for (uint32_t child_index = 0; child_index < (uint32_t) GAP_LIMIT; child_index++) {
 				key_pair_t *child_key = NULL;
-				if (!accounts_array[i]->child_keys[j]) {
-					uint32_t index = (uint32_t)j;
-					child_key = gcry_malloc_secure(sizeof(key_pair_t));
-					if (!child_key) {
-						fprintf(stderr, "Error gcry_malloc_secure\n");
-						zero_and_gcry_free((void *)change_key, sizeof(key_pair_t));
-						for (int k = 0; k < addr_count; k++) gcry_free(addresses[k]);
-						gcry_free(addresses);
-						return -1;
-					}
-					result = derive_child_key(change_key, index, child_key); // m/44'/0'/account'/change/index
-					if (result != 0) {
-						fprintf(stderr, "Failed to derive index key %d\n", index);
-						zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void*)change_key, (void*)child_key, NULL);
-						for (int k = 0; k < addr_count; k++) gcry_free(addresses[k]);
-						gcry_free(addresses);
-						return -1;
-					}
-				} else {
-					child_key = accounts_array[i]->child_keys[j];	
+				child_key = gcry_malloc_secure(sizeof(key_pair_t));
+				if (!child_key) {
+					fprintf(stderr, "Error gcry_malloc_secure\n");
+					for (int k = 0; k < addr_count; k++) gcry_free(addresses[k]);
+					gcry_free(addresses);
+					zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
+					return -1;
+				}
+				result = derive_from_change_to_child(change_key, child_index, child_key); // m/44'/0'/account'/change/index
+				if (result != 0) {
+					fprintf(stderr, "Failed to derive child key\n");
+					for (int k = 0; k < addr_count; k++) gcry_free(addresses[k]);
+					gcry_free(addresses);
+					zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);
+					return -1;
 				}
 				result = pubkey_to_address(child_key->key_pub_compressed, PUBKEY_LENGTH, addresses[addr_count], ADDRESS_MAX_LEN);
 				if (result != 0) {
 					fprintf(stderr, "Failed to generate address\n");
-					zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void*)change_key, NULL);
-					if (!accounts_array[i]->child_keys[j]) zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
 					for (int k = 0; k < addr_count; k++) gcry_free(addresses[k]);
 					gcry_free(addresses);
+					zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);
 					return -1;
 				}
 				addr_count++;
-				if (!accounts_array[i]->child_keys[j]) zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
+				zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
 			}
 			zero_and_gcry_free((void *)change_key, sizeof(key_pair_t));
 		}
 		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
 	}
     	long long balance = get_balance((const char **)addresses, addr_count, last_request);
-    	for (int i = 0; i < addr_count; i++) gcry_free(addresses[i]);
+    	for (int k = 0; k < addr_count; k++) gcry_free(addresses[k]);
     	gcry_free(addresses);
-
-    	if (balance >= 0) {
-		printf("Total balance: %lld satoshis (%.8f BTC)\n", balance, balance / 100000000.0);
-    	} else {
-		printf("Failed to retrieve balance\n");
-	}
-
 	return balance;		
 }
 

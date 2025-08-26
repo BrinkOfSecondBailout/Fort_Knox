@@ -21,22 +21,19 @@ void print_logo() {
 }
 
 int init_user(User *user) {
-	if (!user) return -1;
+	if (!user) return 1;
 	zero((void *)user, sizeof(User));
 	zero((void *)user->seed, SEED_LENGTH);
 	user->master_key = NULL;
 	user->accounts = NULL;
-	user->accounts = gcry_calloc_secure(INITIAL_ACCOUNTS_CAPACITY, sizeof(account_t));
+	user->accounts = gcry_calloc_secure(ACCOUNTS_CAPACITY, sizeof(account_t));
 	if (!user->accounts) {
 		zero_and_gcry_free((void *)user, sizeof(User));
 		return 1;
 	}
-	for (size_t i = 0; i < INITIAL_ACCOUNTS_CAPACITY; i++) {
-		user->accounts[i] = NULL;
-	}
+	zero((void *)user->accounts, ACCOUNTS_CAPACITY * sizeof(account_t));
 	user->accounts_count = 0;
-	user->accounts_capacity = INITIAL_ACCOUNTS_CAPACITY;
-	
+	user->accounts_capacity = ACCOUNTS_CAPACITY;
 	user->last_api_request = 0;
 	return 0;
 }
@@ -50,12 +47,6 @@ void free_user(User *user) {
 	}
 	if (user->accounts_count > 0) {
 		for (size_t i = 0; i < user->accounts_count; i++) {
-			if (user->accounts[i]->child_key_count > 0) {
-				for (size_t j = 0; j < user->accounts[i]->child_key_count; j++) {
-					zero_and_gcry_free((void *)user->accounts[i]->child_keys[j], sizeof(key_pair_t));
-					user->accounts[i]->child_keys[j] = NULL;
-				}
-			}
 			zero_and_gcry_free((void *)user->accounts[i], sizeof(account_t));
 			user->accounts[i] = NULL;
 		}
@@ -67,33 +58,17 @@ void free_user(User *user) {
 	gcry_free(user);
 }
 
-int add_child_key_to_account(account_t *account, key_pair_t *child_key) {
-	// Resize child keys dynamic array if needed
-	if (account->child_key_count >= account->child_key_capacity) {
-		size_t new_capacity = account->child_key_capacity * 2;	
-		key_pair_t **temp = gcry_calloc_secure(new_capacity, sizeof(key_pair_t*));
-		if (!temp) {
-			fprintf(stderr, "Error reallocating array\n");
-			return 1;
-		}
-		zero((void *)temp, new_capacity * sizeof(key_pair_t *));
-		for (size_t j = 0; j < account->child_key_count; j++) {
-			temp[j] = account->child_keys[j];
-		}
-		account->child_keys = temp;
-	}
-	account->child_keys[account->child_key_count] = child_key;
-	account->child_key_count++;
-	printf("Child key successfully added to session\n");
-	return 0;
+void increment_account_used_index(account_t *account) {
+	account->used_indexes_count++;
+	return;
 }
 
 account_t *add_account_to_user(User *user, uint32_t account_index) {
 	// Check if account index already exists
 	for (size_t i = 0; i < user->accounts_count; i++) {
 		if (user->accounts[i]->account_index == account_index) {
-			printf("Account index already exists in session. Success.\n");
-			return NULL;
+			printf("Account index %u already exists in session. Success.\n", account_index);
+			return user->accounts[i];
 		}
 	}
 	// Resize dynamic array if necessary
@@ -105,17 +80,16 @@ account_t *add_account_to_user(User *user, uint32_t account_index) {
 	account_t *new_account = (account_t *)gcry_malloc_secure(sizeof(account_t));
 	new_account->account_index = account_index;
 	// Initialize child keys for account
-	key_pair_t **child_keys = gcry_calloc_secure(INITIAL_CHILD_KEY_CAPACITY, sizeof(key_pair_t *));
-	if (!child_keys) {
-		zero((void *)user->accounts, sizeof(user->accounts_capacity));
+	uint32_t **used_indexes = gcry_calloc_secure(INITIAL_USED_INDEXES_CAPACITY, sizeof(uint32_t*));
+	if (!used_indexes) {
+		fprintf(stderr, "Failure allocating used indexes pointers\n");
+		zero_and_gcry_free((void *)new_account, sizeof(account_t));
 		return NULL;
 	}
-	zero((void *)child_keys, INITIAL_CHILD_KEY_CAPACITY * sizeof(key_pair_t*));
-	new_account->child_keys = child_keys;
-	new_account->child_key_count = 0;
-	new_account->child_key_capacity = INITIAL_CHILD_KEY_CAPACITY;
+	new_account->used_indexes_count = 0;
 	// Add account to user accounts
 	user->accounts[user->accounts_count++] = new_account;
+	printf("Successfully added new account %u to session for use\n", account_index);
 	return new_account;
 }
 
@@ -448,43 +422,21 @@ int32 balance_handle(User *user) {
 		"Type 'new' or 'recover' to begin\n");
 		return 1;
 	}
-	char cmd[256];
-	uint32_t account_index;
-	printf("Enter the account index number you want to see the balance of\n"
-		"We recommend keeping it at 0 as per the BIP44 standard,\n"
-		"but enter any number between 0 - 5.\n"
-		"Keep in mind that this balance will only reflect the particular account index you choose\n"
-		"as well as any other account indexes you may have used during this session, which we try to keep track for you\n"
-		"but you must be responsible for remembering them as well.\n"
-		"For the purpose of keeping this app simple and less memory/time intensive,\n"
-		"We will scan up to 20 child key indexes per account (up to maximum 5 accounts).\n"
-		"This means if you have funds sent to a child key index higher than 20 of a particular account,\n"
-		"You will not see it reflected in this balance, but this doesn't mean your funds are not available in your wallet.\n");
-	while (1) {
-		zero((void*)cmd, sizeof(cmd));
-		printf("Enter account number between 0-5, (recommended: 0) > ");
-		if (!fgets(cmd, sizeof(cmd), stdin)) {
-			fprintf(stderr, "fgets failure\n");
-			return 1;
-		}
-		cmd[strlen(cmd) - 1] = '\0';
-		int j = 0;
-		while (cmd[j] != '\0') {
-			cmd[j] = tolower((unsigned char)cmd[j]);
-			j++;
-		}
-		if (strcmp(cmd, "exit") == 0) exit_handle(user);
-		account_index = (uint32_t)atoi(cmd);
-		if (account_index > (uint32_t) 5) {
-			fprintf(stderr, "Maximum account index for this program is 5. Enter a number from 0 to 5.\n");
-		} else {
-			break;
-		}
-	}
-	add_account_to_user(user, account_index);	
+	printf("For the purpose of keeping this app simple and less memory/complexity intensive,\n"
+		"we will scan up to 20 child key indexes per account (5 accounts total).\n"
+		"This means this balance will reflect your account 0-5 (up to index 20 of each account).\n"
+		"Note: if you have funds in an account index above 5 or if one of your address\n"
+		"key index is higher than 20 you will not see those funds reflected in this balance,\n"
+		"doesn't necessarily mean that the funds aren't in your wallet associated with your seed phrase, however.\n");
+	printf(GREEN"Please wait while we query the blockchain for your balance...\n"RESET);
+
 	curl_global_init(CURL_GLOBAL_DEFAULT);
-	long long balance = get_account_balance(user->master_key, user->accounts, user->accounts_count, (time_t*)&user->last_api_request);
-	(void)balance;
+	long long balance = get_account_balance(user->master_key, (time_t*)&user->last_api_request);
+  	if (balance >= 0) {
+		printf("Total balance: %lld satoshis (%.8f BTC)\n", balance, balance / 100000000.0);
+    	} else {
+		printf("Failed to retrieve balance\n");
+	}
 	curl_global_cleanup();
 	return 0;
 }
@@ -506,7 +458,7 @@ int32 receive_handle(User *user) {
 		"To keep it simple, just use 0.\n");
 	while (1) {
 		zero((void*)cmd, sizeof(cmd));
-		printf("Enter account number (recommended: 0) > ");
+		printf("Enter account number between 0-5 (recommended: 0) > ");
 		if (!fgets(cmd, sizeof(cmd), stdin)) {
 			fprintf(stderr, "fgets failure\n");
 			return 1;
@@ -537,58 +489,49 @@ int32 receive_handle(User *user) {
 		fprintf(stderr, "Error gcry_malloc_secure\n");
 		return 1;
 	}
-	int result = derive_from_public_to_account(user->master_key, account_index, account_key);
+	int result = derive_from_public_to_account(user->master_key, account_index, account_key); // m/44'/0'/account'
 	if (result != 0) {
 		fprintf(stderr, "Failed to derive account key\n");
 		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
 		return 1;
 	}
-	// Continue deriving at change 0
+		
 	key_pair_t *change_key;
 	change_key = gcry_malloc_secure(sizeof(key_pair_t));
 	if (!change_key) {
-		fprintf(stderr, "Error gcry malloc change key\n");
-		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
+		fprintf(stderr, "Error gcry_malloc_secure\n");
 		return 1;
 	}
-	result = derive_child_key(account_key, 0, change_key);
+	result = derive_from_account_to_change(account_key, (uint32_t)0, change_key);
 	if (result != 0) {
 		fprintf(stderr, "Failed to derive change key\n");
-		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);	
+		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
 		return 1;
-	} 
-	// Generate a new child key at the next available index (external chain: m/44'/0'/0'/account'/0/i)
-	uint32_t i = (uint32_t)account->child_key_count;
-	key_pair_t *child_key = NULL;
+	}
+	key_pair_t *child_key;
 	child_key = gcry_malloc_secure(sizeof(key_pair_t));
 	if (!child_key) {
-		fprintf(stderr, "Error gcry malloc child key\n");
-		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);	
+		fprintf(stderr, "Error gcry_malloc_secure\n");
+		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
 		return 1;
 	}
-	result = derive_child_key(change_key, i, child_key); // m/44'/0'/0'/account'/0/i
+	result = derive_from_change_to_child(change_key, (uint32_t)account->used_indexes_count, child_key);
 	if (result != 0) {
-		fprintf(stderr, "Failed to derive child key %d\n", i);
-		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);	
+		fprintf(stderr, "Failed to derive child key\n");
+		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);
 		return 1;
 	}
-	// Add child key to account
-	result = add_child_key_to_account(account, child_key);
-	if (result != 0) {	
-		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);	
-		return 1;
-	}
-	// Use the last generated child key for receive address
-	key_pair_t *receive_key = account->child_keys[account->child_key_count - 1];
+	increment_account_used_index(account);
+		
 	char address[ADDRESS_MAX_LEN];
-	result = pubkey_to_address(receive_key->key_pub_compressed, PUBKEY_LENGTH, address, ADDRESS_MAX_LEN);
+	result = pubkey_to_address(child_key->key_pub_compressed, PUBKEY_LENGTH, address, ADDRESS_MAX_LEN);
 	if (result != 0) {
-		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);	
+		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)child_key, NULL);	
 		fprintf(stderr, "Failed to generate receive address.\n");
 		return 1;
 	}
 	// Clean up intermediate keys
-	zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);	
+	zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)child_key, NULL);	
 	// New receive address
 	printf("New receive address: %s\n", address);
 	printf("Use this adddress to receive Bitcoin. You can:\n"

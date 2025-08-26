@@ -2,6 +2,8 @@
 #include "common.h"
 #include "crypt.h"
 
+#define MEM_POOL_CAPACITY 65536 // 64 kb
+
 gcry_error_t init_gcrypt() {
 	gcry_error_t err = GPG_ERR_NO_ERROR;
 	const char *version =  gcry_check_version(NEED_LIBGCRYPT_VERSION);
@@ -15,7 +17,7 @@ gcry_error_t init_gcrypt() {
 		fprintf(stderr, "Warning suspension failed\n");
                 exit(EXIT_FAILURE);
 	}
-        err = gcry_control(GCRYCTL_INIT_SECMEM, 16384, 0);
+        err = gcry_control(GCRYCTL_INIT_SECMEM, MEM_POOL_CAPACITY, 0);
         if (err) {
 		fprintf(stderr, "Secure memory enabling failed\n");
                 exit(EXIT_FAILURE);
