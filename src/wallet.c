@@ -565,6 +565,57 @@ static size_t curl_write_callback_func(void *contents, size_t size, size_t nmemb
 	return realsize;
 }
 
+double get_bitcoin_price(time_t *last_request) {
+	CURL *curl = curl_easy_init();
+	if (!curl) {
+		fprintf(stderr, "Failed to initialize CURL\n");
+		return -1.0;
+	}
+	char url[] = "https://blockchain.info/ticker";
+	curl_buffer_t buffer = {0};
+	curl_easy_setopt(curl, CURLOPT_URL, url);
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_callback_func);
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buffer);
+
+	time_t now = time(NULL);
+	if (*last_request != 0 && difftime(now, *last_request) < 30) {
+		int sleep_time = 30 - (int)difftime(now, *last_request);
+		printf("Rate limit: 1 request per 30 seconds...\nWaiting %d seconds...\n", sleep_time);
+		sleep(sleep_time);
+	}
+	CURLcode res = curl_easy_perform(curl);
+	*last_request = time(NULL);
+	curl_easy_cleanup(curl);
+	if (res != CURLE_OK) {
+		fprintf(stderr, "CURL failed: %s\n", curl_easy_strerror(res));
+		free(buffer.data);
+		return -1.0;
+	}
+	json_error_t error;
+    	json_t *root = json_loads(buffer.data, 0, &error);
+    	free(buffer.data);
+    	if (!root) {
+        	fprintf(stderr, "JSON parse error: %s\n", error.text);
+        	return -1.0;
+    	}
+    	// Extract USD price (last)
+    	json_t *usd = json_object_get(root, "USD");
+    	if (!json_is_object(usd)) {
+        	fprintf(stderr, "Failed to find USD object in JSON\n");
+        	json_decref(root);
+        	return -1.0;
+    	}
+    	json_t *last = json_object_get(usd, "last");
+    	if (!json_is_number(last)) {
+        	fprintf(stderr, "Failed to find last price in USD object\n");
+        	json_decref(root);
+        	return -1.0;
+    	}
+    	double price = json_number_value(last);
+    	json_decref(root);
+    	return price;
+}
+
 // Get total balance for a list of addresses (in satoshis)
 long long get_balance(const char **addresses, int num_addresses, time_t *last_request) {
 	printf("Querying the blockchain for 20 Bech32-P2WPKH addresses (external and internal chain) associated with this wallet account...\n");
@@ -595,7 +646,7 @@ long long get_balance(const char **addresses, int num_addresses, time_t *last_re
 	time_t now = time(NULL);
 	if (*last_request != 0 && difftime(now, *last_request) < 30) {
 		int sleep_time = 30 - (int)difftime(now, *last_request);
-		printf("Rate limit: Waiting %d seconds...\n", sleep_time);
+		printf("Rate limit: 1 request per 30 seconds...\nWaiting %d seconds...\n", sleep_time);
 		sleep(sleep_time);
 	}
 	// Perform blocking network transfer

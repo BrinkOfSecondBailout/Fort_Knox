@@ -53,6 +53,7 @@ int derive_child_key(const key_pair_t *, uint32_t, key_pair_t *);
 int derive_from_change_to_child(const key_pair_t *, uint32_t, key_pair_t *);
 int derive_from_account_to_change(const key_pair_t *, uint32_t, key_pair_t *);
 int derive_from_public_to_account(const key_pair_t *, uint32_t, key_pair_t *);
+double get_bitcoin_price(time_t*);
 long long get_account_balance(key_pair_t *, uint32_t, time_t*);
 
 #endif

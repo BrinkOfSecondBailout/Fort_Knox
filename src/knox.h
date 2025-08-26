@@ -23,12 +23,13 @@ typedef struct {
 	Callback callback_function;
 } Command_Handler;
 
-int32 new_handle(User *user);
-int32 recover_handle(User *user);
-int32 balance_handle(User *user);
-int32 receive_handle(User *user);
-int32 send_handle(User *user);
-int32 help_handle(User *user);
-int32 menu_handle(User *user);
-int32 exit_handle(User *user);
+int32 price_handle(User *);
+int32 new_handle(User *);
+int32 recover_handle(User *);
+int32 balance_handle(User *);
+int32 receive_handle(User *);
+int32 send_handle(User *);
+int32 help_handle(User *);
+int32 menu_handle(User *);
+int32 exit_handle(User *);
 #endif

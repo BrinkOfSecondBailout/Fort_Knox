@@ -96,22 +96,24 @@ account_t *add_account_to_user(User *user, uint32_t account_index) {
 	user->accounts[user->accounts_count++] = new_account;
 	printf("Successfully added new account %u to session for use\n", account_index);
 	return new_account;
-}
-		
+}	
+	
 void print_commands() {
-	fprintf(stdout, "Welcome bitcoiner! What is your command?\n"
-	"- new				Create a new bitcoin wallet\n"
-	"- recover			Recover your bitcoin wallet with mnemonic words(& passphrase, if set)\n"
-	"- balance			Display balance for all addresses in current wallet\n"
-	"- receive			Receive bitcoin with a new address\n"
-	"- send				Send bitcoin to an address\n"
-	"- help				Safety practices, tips, and educational contents\n"
-	"- menu				Show all commands\n"
-	"- exit				Exit program\n\n");
+	fprintf(stdout, "Welcome bitcoiner! What is your command?\n\n"
+	"- price					Most recent bitcoin price\n"
+	"- new					Create a new bitcoin wallet\n"
+	"- recover				Recover your bitcoin wallet with mnemonic words(& passphrase, if set)\n"
+	"- balance				Display balance for all addresses in current wallet\n"
+	"- receive				Receive bitcoin with a new address\n"
+	"- send					Send bitcoin to an address\n"
+	"- help					Safety practices, tips, and educational contents\n"
+	"- menu					Show all commands\n"
+	"- exit					Exit program\n\n");
 	return;
 }
 
 Command_Handler c_handlers[] = {
+	{ (char *)"price", price_handle},
 	{ (char *)"new", new_handle},
 	{ (char *)"recover", recover_handle},
 	{ (char *)"balance", balance_handle},
@@ -131,6 +133,13 @@ int32 exit_handle(User *user) {
 int has_wallet(User *user) {
 	if (user->seed[0] != 0) return 1;
 	return 0; 
+}
+
+int32 price_handle(User *user) {
+	double price = get_bitcoin_price(&user->last_api_request);
+	if (price < 0.0) return 1;
+	printf("Bitcoin price: %.2f\n", price);	
+	return 0;
 }
 
 int32 new_handle(User *user) {
