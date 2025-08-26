@@ -92,7 +92,7 @@ account_t *add_account_to_user(User *user, uint32_t account_index) {
 	printf("Successfully added new account %u to session for use\n", account_index);
 	return new_account;
 }
-
+		
 void print_commands() {
 	fprintf(stdout, "Welcome bitcoiner! What is your command?\n"
 	"- new				Create a new bitcoin wallet\n"
@@ -162,7 +162,7 @@ int32 new_handle(User *user) {
 	int nword;
 	while (1) {
 		zero((void *)cmd, sizeof(cmd));
-		printf("Select your recovery seed words count (12, 15, 18, 21, 24)\n"
+		printf("Select your recovery seed phrase word count (12, 15, 18, 21, 24)\n"
 			"Note: the higher the number, the larger the entropy AKA more cryptographically secured\n> ");
 		if (!fgets(cmd, sizeof(cmd), stdin)) {
 			fprintf(stderr, "fgets() failure\n");
@@ -208,7 +208,7 @@ int32 new_handle(User *user) {
 				break;
 		} else if (strcmp(cmd, "no") == 0) {
 			printf("\nGot it! Your passphrase is left blank\n"
-				"You will only need to write down your seed words once it's generated\n");
+				"You will only need to write down and remember your seed words once it's generated\n");
 			passphrase[0] = '\0';
 			break;
 		}
@@ -226,7 +226,6 @@ int32 new_handle(User *user) {
 		RED"IMPORTANT:"RESET 
 		" Please write these words down very carefully on a piece of paper\n"
 		"Do NOT type or save them on any electronic devices\n"
-		"I suggest clearing the terminal immediately after writing the words down\n"
 		RED"Losing these words or having them stolen = losing all of your bitcoin\n"RESET, mnemonic);
 	if (passphrase[0]) {
 		printf(RED"ALSO IMPORTANT:"RESET 
@@ -315,10 +314,10 @@ int32 recover_handle(User *user) {
 			break;
 		}
 	}
+	printf("Got it! You have a %d words mnemonic seed phrase.\n", nword);
+	printf("Example: habit eager gallery cabbage interest vacuum unaware wait invest gap game lab\n> ");
 	while (1) {
-		printf("Got it! You have a %d words mnemonic seed phrase.\n"
-		"Next, enter your %d words mnemonic seed phrase, each separated by a single space.\n"
-		"Example: habit eager gallery cabbage interest vacuum unaware wait invest gap game lab\n> ", nword, nword);
+		printf("Enter your %d words mnemonic seed phrase, each separated by a single space, like the example above.\n> ", nword);
 		zero((void *)mnemonic, sizeof(mnemonic));
 		if (!fgets(mnemonic, sizeof(mnemonic), stdin)) {
 			fprintf(stderr, "fgets() failure\n");
@@ -343,11 +342,11 @@ int32 recover_handle(User *user) {
 			}
 		}
 	}
-	printf("Got it! Clear your terminal to prevent hackers from potentially screen capturing your seed!\n");
+	printf("Got it!\n");
+	printf("Do you have a passphrase to add to the mnemonic seed?\n");
+	printf("Keep in mind a completely different wallet will appear based on whether a passphrase was used or not.\n");
 	while (1) {
-		printf("Do you have a passphrase to add to the mnemonic seed?\n"
-			"Keep in mind a completely different wallet will appear based on whether a passphrase was used or not.\n"
-			"Type 'yes' or 'no'\n> ");
+		printf("Type 'yes' or 'no'\n> ");
 		zero((void *)cmd, sizeof(cmd));
 		zero((void *)passphrase, sizeof(passphrase));
 		if (!fgets(cmd, sizeof(cmd), stdin)) {
@@ -374,7 +373,7 @@ int32 recover_handle(User *user) {
 				return 1;
 			}
 			passphrase[strlen(passphrase) - 1] = '\0';
-			printf("\nPassphrase successfully included..");
+			printf("\nPassphrase successfully included...\n");
 			break;
 		} else if (strcmp(cmd, "no") == 0) {
 			printf("\nGot it! Your passphrase is left blank\n");
@@ -428,7 +427,7 @@ int32 balance_handle(User *user) {
 		"Note: if you have funds in an account index above 5 or if one of your address\n"
 		"key index is higher than 20 you will not see those funds reflected in this balance,\n"
 		"doesn't necessarily mean that the funds aren't in your wallet associated with your seed phrase, however.\n");
-	printf(GREEN"Please wait while we query the blockchain for your balance...\n"RESET);
+	printf("Please wait while we query the blockchain for your balance...\n");
 
 	curl_global_init(CURL_GLOBAL_DEFAULT);
 	long long balance = get_account_balance(user->master_key, (time_t*)&user->last_api_request);
