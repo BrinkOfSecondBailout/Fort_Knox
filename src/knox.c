@@ -17,6 +17,13 @@ void print_logo() {
 	}
 	printf(RESET);
 	fclose(logo);
+	printf(RED"***For educational purposes ONLY***\n"RESET);
+	printf("***This is a HOT wallet built by one developer you should not 'trust', as per the bitcoin ethos***\n");
+	printf("***Exercise extreme cautions. Only TINY (if any) amounts of sats should be sent to any wallet derived by this app***\n"
+		"***Until much further rigorous testings and verifications***\n"
+		"***Any funds sent to a wallet address derived from this app could be lost forever***\n");
+	printf("\n...and so with that being said...\n\n");
+	printf(GREEN"\n'Wake up Neo...'\n"RESET);
 	return;
 }
 
@@ -35,6 +42,12 @@ int init_user(User *user) {
 	user->accounts_count = 0;
 	user->accounts_capacity = ACCOUNTS_CAPACITY;
 	user->last_api_request = 0;
+	user->last_price_cached = 0;
+	double price = get_bitcoin_price(&user->last_api_request);
+	if (price > 0.0) {
+		user->last_price_cached = price;
+	}
+	user->last_api_request = time(NULL);
 	return 0;
 }
 
@@ -58,6 +71,7 @@ void free_user(User *user) {
 	user->accounts_count = 0;
 	user->accounts_capacity = 0;
 	user->last_api_request = 0;
+	user->last_price_cached = 0.0;
 	gcry_free(user);
 	printf("User data successfully cleared...\n");
 	return;
@@ -137,7 +151,13 @@ int has_wallet(User *user) {
 
 int32 price_handle(User *user) {
 	double price = get_bitcoin_price(&user->last_api_request);
-	if (price < 0.0) return 1;
+	if (price < 0.0) {
+		fprintf(stderr, "Failed to fetch new price data.\n");
+		if (user->last_price_cached != 0.0) {
+			printf("Here's the most recent bitcoin price: %.2f\n", user->last_price_cached);
+		}
+		return 1;
+	}
 	printf("Bitcoin price: %.2f\n", price);	
 	return 0;
 }
@@ -469,7 +489,13 @@ int32 balance_handle(User *user) {
 	curl_global_init(CURL_GLOBAL_DEFAULT);
 	long long balance = get_account_balance(user->master_key, account_index, (time_t*)&user->last_api_request);
   	if (balance >= 0) {
-		printf("Total balance: %lld satoshis (%.8f BTC)\n", balance, balance / 100000000.0);
+		printf("Total balance for this wallet, account %u:\n\n"
+		"%lld satoshis (%.8f BTC)\n"
+		"%.2f dollars (most recent price: $%.2f)\n",
+		account_index,
+		balance, balance / SATS_IN_BITCOIN, 
+		(balance / SATS_IN_BITCOIN) * user->last_price_cached, 
+		user->last_price_cached);
     	} else {
 		printf("Failed to retrieve balance\n");
 	}

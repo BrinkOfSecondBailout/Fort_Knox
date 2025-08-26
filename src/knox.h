@@ -4,6 +4,7 @@
 #define KNOX_H
 #include "wallet.h"
 
+#define SATS_IN_BITCOIN 100000000.0
 
 typedef unsigned int int32;
 
@@ -14,6 +15,7 @@ typedef struct {
 	size_t accounts_count;
 	size_t accounts_capacity;
 	time_t last_api_request;
+	double last_price_cached;
 } User;
 
 typedef int32 (*Callback)(User *user);
