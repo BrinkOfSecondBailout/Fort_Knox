@@ -8,8 +8,8 @@
 int mnemonic_to_seed(const char *mnemonic, const char *passphrase, uint8_t *seed_buffer) {
         // Use PBKDF2 to derive seed (BIP-39)
         // Prepare salt: "mnemonic" + passphrase (or empty string)
-printf("Mnemonic -\n%s\n", mnemonic);
-printf("Passphrase -\n%s\n", passphrase);
+//printf("Mnemonic -\n%s\n", mnemonic);
+//printf("Passphrase -\n%s\n", passphrase);
 	char salt[128];
 	snprintf(salt, sizeof(salt), "mnemonic%s", passphrase[0] ? passphrase : "");
         uint8_t seed[64];
@@ -17,7 +17,7 @@ printf("Passphrase -\n%s\n", passphrase);
 	if (err != 0) return 1;
         // Store in key_pair_t
 	memcpy((void *)seed_buffer, seed, SEED_LENGTH);
-print_bytes_as_hex("Seed -", seed, SEED_LENGTH);
+//print_bytes_as_hex("Seed -", seed, SEED_LENGTH);
         return 0;
 }
 

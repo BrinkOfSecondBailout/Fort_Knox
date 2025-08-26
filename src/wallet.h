@@ -5,6 +5,8 @@
 #define WALLET_H
 
 #define N_VALUE_HEX "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141"
+#define HARD_FLAG 0x80000000
+
 #define ACCOUNTS_CAPACITY 5
 #define INITIAL_USED_INDEXES_CAPACITY 20
 #define SEED_LENGTH 64
@@ -51,6 +53,6 @@ int derive_child_key(const key_pair_t *, uint32_t, key_pair_t *);
 int derive_from_change_to_child(const key_pair_t *, uint32_t, key_pair_t *);
 int derive_from_account_to_change(const key_pair_t *, uint32_t, key_pair_t *);
 int derive_from_public_to_account(const key_pair_t *, uint32_t, key_pair_t *);
-long long get_account_balance(key_pair_t *, time_t*);
+long long get_account_balance(key_pair_t *, uint32_t, time_t*);
 
 #endif

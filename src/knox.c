@@ -40,22 +40,27 @@ int init_user(User *user) {
 
 void free_user(User *user) {
 	if (!user) return;
+	printf("Cleaning up secured memory...\n");
 	if (user->master_key) {
 		zero((void *)user->master_key, sizeof(key_pair_t));
 		gcry_free(user->master_key);
 		user->master_key = NULL;
+		printf("User master key cleared...\n");
 	}
 	if (user->accounts_count > 0) {
 		for (size_t i = 0; i < user->accounts_count; i++) {
 			zero_and_gcry_free((void *)user->accounts[i], sizeof(account_t));
 			user->accounts[i] = NULL;
 		}
+		printf("User accounts cleared...\n");
 	}
 	zero((void *)user->seed, SEED_LENGTH);
 	user->accounts_count = 0;
 	user->accounts_capacity = 0;
 	user->last_api_request = 0;
 	gcry_free(user);
+	printf("User data successfully cleared...\n");
+	return;
 }
 
 void increment_account_used_index(account_t *account) {
@@ -119,6 +124,7 @@ Command_Handler c_handlers[] = {
 
 int32 exit_handle(User *user) {
 	printf("Bye now, bitcoiner!\n");
+	free_user(user);
 	exit(0);
 }
 
@@ -422,15 +428,37 @@ int32 balance_handle(User *user) {
 		return 1;
 	}
 	printf("For the purpose of keeping this app simple and less memory/complexity intensive,\n"
-		"we will scan up to 20 child key indexes per account (5 accounts total).\n"
-		"This means this balance will reflect your account 0-5 (up to index 20 of each account).\n"
-		"Note: if you have funds in an account index above 5 or if one of your address\n"
-		"key index is higher than 20 you will not see those funds reflected in this balance,\n"
-		"doesn't necessarily mean that the funds aren't in your wallet associated with your seed phrase, however.\n");
-	printf("Please wait while we query the blockchain for your balance...\n");
-
+		"we will scan up to 20 child key index addresses per account.\n"
+		"This means the balance queried will reflect only of your selected account (up to index 20 of each account).\n"
+		"Note: if you have funds in a different account index or if one of your address\n"
+		"key index is higher than 20 you will not see those funds reflected in this balance.\n"
+		"This does not necessarily mean that the funds aren't in your wallet associated with your seed phrase, however.\n");
+	char cmd[256];
+	uint32_t account_index;
+	while(1) {
+		printf("Please enter the account number you'd like to see the balance of (between 0 - 100)\n> ");
+		zero((void *)cmd, 256);
+		if (!fgets(cmd, 256, stdin)) {
+			fprintf(stderr, "Failure reading account number\n");
+			return 1;
+		}
+		cmd[strlen(cmd) - 1] = '\0';
+		int j = 0;
+		while (cmd[j] != '\0') {
+			cmd[j] = tolower((unsigned char)cmd[j]);
+			j++;
+		}
+		if (strcmp(cmd, "exit") == 0) exit_handle(user);
+		if (atoi(cmd) < 0 || atoi(cmd) > 100) {
+			fprintf(stderr, "Enter a valid account number between 0 - 100.\n");
+		} else {
+			account_index = (uint32_t)atoi(cmd);
+			break;
+		}
+	}
+	printf("Please wait while we query the blockchain for your balance...(account %u)\n", account_index);
 	curl_global_init(CURL_GLOBAL_DEFAULT);
-	long long balance = get_account_balance(user->master_key, (time_t*)&user->last_api_request);
+	long long balance = get_account_balance(user->master_key, account_index, (time_t*)&user->last_api_request);
   	if (balance >= 0) {
 		printf("Total balance: %lld satoshis (%.8f BTC)\n", balance, balance / 100000000.0);
     	} else {

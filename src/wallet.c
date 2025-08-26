@@ -140,15 +140,15 @@ static uint32_t bech32_polymod(const uint8_t *values, size_t len) {
 // Convert compressed pub to P2WPKH (Segwit) address
 int pubkey_to_address(const uint8_t *pub_key, size_t pub_key_len, char *address, size_t address_len) {
 	if (pub_key_len != PUBKEY_LENGTH || !address) return -1;
-printf("\n");
-print_bytes_as_hex("Original pub key (33 bytes)", pub_key, pub_key_len);
+//printf("\n");
+//print_bytes_as_hex("Original pub key (33 bytes)", pub_key, pub_key_len);
 	// Compute SHA256
 	uint8_t sha256[32];
 	gcry_md_hash_buffer(GCRY_MD_SHA256, sha256, pub_key, pub_key_len);
 	// Compute RIPEMD160
 	uint8_t ripemd160[20];
 	gcry_md_hash_buffer(GCRY_MD_RMD160, ripemd160, sha256, 32);
-print_bytes_as_hex("After RIPEMD160 (PubKeyHash) (20 bytes)", ripemd160, 20);
+//print_bytes_as_hex("After RIPEMD160 (PubKeyHash) (20 bytes)", ripemd160, 20);
 	// Convert PubKeyHash to 5-bit groups
 	uint8_t program_values[BECH32_VALUES_MAX];
 	size_t program_values_len;
@@ -323,12 +323,12 @@ int generate_master_key(const uint8_t *seed, size_t seed_len, key_pair_t *master
 	memcpy(master->key_pub_extended, master->key_pub_compressed, PUBKEY_LENGTH);
 	memcpy(master->key_pub_extended + PUBKEY_LENGTH, master->chain_code, CHAINCODE_LENGTH);
 	master->key_index = 0; // Master is at depth 0
-
+/*
 print_bytes_as_hex("Master Priv    ", master->key_priv, PRIVKEY_LENGTH);
 print_bytes_as_hex("Chain Code     ", master->chain_code, CHAINCODE_LENGTH);
 print_bytes_as_hex("Compressed Pub ", master->key_pub_compressed, PUBKEY_LENGTH);
 print_bytes_as_hex("Extended Pub   ", master->key_pub_extended, PUBKEY_LENGTH + CHAINCODE_LENGTH);
-
+*/
 	return 0;
 }
 
@@ -336,7 +336,7 @@ print_bytes_as_hex("Extended Pub   ", master->key_pub_extended, PUBKEY_LENGTH + 
 int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child) {
 	uint8_t data[37]; // For HMAC input, 1 + 32 priv + 4 index or 33 pub + 4 index
 	size_t data_len;
-	int hardened = (index & 0x80000000) != 0; // 0: normal, 0x80000000: hardened
+	int hardened = (index & HARD_FLAG) != 0; // 0: normal, 0x80000000: hardened
 	if (hardened) {
 		data[0] = 0x00;
 		memcpy(data + 1, parent->key_priv, PRIVKEY_LENGTH);
@@ -476,34 +476,34 @@ int generate_address(const uint8_t *key_pub_compressed, char *address, size_t ad
 }
 
 int derive_from_change_to_child(const key_pair_t *change_key, uint32_t child_index, key_pair_t *child_key) {
-printf("Deriving from change to child\n");
+//printf("Deriving from change to child\n");
 	// Derive from change to child - m/44'/0'/0'/account/change/index
 	int result = derive_child_key(change_key, child_index, child_key); // m/44'/0'/account'/change/index
 	if (result != 0) {
 		fprintf(stderr, "Failed to derive index key\n");
 		return -1;
 	}
-print_bytes_as_hex("Child key priv", child_key->key_priv, PRIVKEY_LENGTH);
-print_bytes_as_hex("Child key pub", child_key->key_pub_compressed, PUBKEY_LENGTH);
+//print_bytes_as_hex("Child key priv", child_key->key_priv, PRIVKEY_LENGTH);
+//print_bytes_as_hex("Child key pub", child_key->key_pub_compressed, PUBKEY_LENGTH);
 	return 0;
 }
 
 int derive_from_account_to_change(const key_pair_t *account_key, uint32_t change_index, key_pair_t *change_key) {
-printf("Deriving from account to chage\n");
+//printf("Deriving from account to change\n");
 	// Derive from account to change - m/44'/0'/0'/account/change/
 	int result = derive_child_key(account_key, change_index, change_key); // m'/44'/0'/account'/change	
 	if (result != 0) {
 		fprintf(stderr, "Failure deriving child key\n");
 		return -1;
 	}
-print_bytes_as_hex("Change key priv", change_key->key_priv, PRIVKEY_LENGTH);
-print_bytes_as_hex("Change key pub", change_key->key_pub_compressed, PUBKEY_LENGTH);
+//print_bytes_as_hex("Change key priv", change_key->key_priv, PRIVKEY_LENGTH);
+//print_bytes_as_hex("Change key pub", change_key->key_pub_compressed, PUBKEY_LENGTH);
 	return 0;
 }
 
 // Derive from public key all the way up to account - m/purpose'/coin'/account'/
 int derive_from_public_to_account(const key_pair_t *pub_key, uint32_t account_index, key_pair_t *account_key) {
-printf("Deriving from public to account\n");
+//printf("Deriving from public to account\n");
 	// Derive from public to account - m/44'/0'/0'/account
 	key_pair_t *purpose_key = NULL;
 	purpose_key = gcry_malloc_secure(sizeof(key_pair_t));
@@ -512,14 +512,14 @@ printf("Deriving from public to account\n");
 		zero_and_gcry_free((void *)purpose_key, sizeof(key_pair_t));
 		return 1;
 	}
-	int result = derive_child_key(pub_key, 0x80000000 | 44, purpose_key); // m/44'
+	int result = derive_child_key(pub_key, HARD_FLAG | 44, purpose_key); // m/44'
 	if (result != 0) {
 		fprintf(stderr, "Failed to derive purpose key\n");
 		zero_and_gcry_free((void *)purpose_key, sizeof(key_pair_t));
 		return 1;
 	}
-print_bytes_as_hex("Purpose key priv", purpose_key->key_priv, PRIVKEY_LENGTH);
-print_bytes_as_hex("Purpose key pub", purpose_key->key_pub_compressed, PUBKEY_LENGTH);
+//print_bytes_as_hex("Purpose key priv", purpose_key->key_priv, PRIVKEY_LENGTH);
+//print_bytes_as_hex("Purpose key pub", purpose_key->key_pub_compressed, PUBKEY_LENGTH);
 	key_pair_t *coin_key = NULL;
 	coin_key = gcry_malloc_secure(sizeof(key_pair_t));
 	if (!coin_key) {
@@ -527,23 +527,23 @@ print_bytes_as_hex("Purpose key pub", purpose_key->key_pub_compressed, PUBKEY_LE
 		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)purpose_key, (void *)coin_key, NULL);
 		return 1;
 	}
-	result = derive_child_key(purpose_key, 0x80000000 | 0, coin_key); // m/44'/0'
+	result = derive_child_key(purpose_key, HARD_FLAG | 0, coin_key); // m/44'/0'
 	if (result != 0) {
 		fprintf(stderr, "Failed to derive coin key\n");
 		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)purpose_key, (void *)coin_key, NULL);
 		return 1;
 	}
 	
-print_bytes_as_hex("Coin key priv", coin_key->key_priv, PRIVKEY_LENGTH);
-print_bytes_as_hex("Coin key pub", coin_key->key_pub_compressed, PUBKEY_LENGTH);
-	result = derive_child_key(coin_key, 0x80000000 | account_index, account_key); // m/44'/0'/account'
+//print_bytes_as_hex("Coin key priv", coin_key->key_priv, PRIVKEY_LENGTH);
+//print_bytes_as_hex("Coin key pub", coin_key->key_pub_compressed, PUBKEY_LENGTH);
+	result = derive_child_key(coin_key, HARD_FLAG | account_index, account_key); // m/44'/0'/account'
 	if (result != 0) {
 		fprintf(stderr, "Failed to derive account 0 key\n");
 		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)purpose_key, (void *)coin_key, NULL);
 		return 1;
 	}
-print_bytes_as_hex("Account key priv", account_key->key_priv, PRIVKEY_LENGTH);
-print_bytes_as_hex("Account key pub", account_key->key_pub_compressed, PUBKEY_LENGTH);
+//print_bytes_as_hex("Account key priv", account_key->key_priv, PRIVKEY_LENGTH);
+//print_bytes_as_hex("Account key pub", account_key->key_pub_compressed, PUBKEY_LENGTH);
 	zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)purpose_key, (void *)coin_key, NULL);
 	return 0;
 } 
@@ -567,20 +567,22 @@ static size_t curl_write_callback_func(void *contents, size_t size, size_t nmemb
 
 // Get total balance for a list of addresses (in satoshis)
 long long get_balance(const char **addresses, int num_addresses, time_t *last_request) {
-printf("Num of Addresses: %d\n", num_addresses);
-
-	if (*addresses[0] == '\0' || num_addresses == 0) return -1;
+	printf("Querying the blockchain for 20 Bech32-P2WPKH addresses (external and internal chain) associated with this wallet account...\n");
+	if (*addresses[0] == '\0' || num_addresses == 0) {
+		fprintf(stderr, "Addresses invalid.\n");
+		return -1;
+	}
 	// Set a curl handle for the data transfer
 	CURL *curl = curl_easy_init();
 	if (!curl) return -1;
 	// Build pipe-separated address list for API
-	char addr_list[2048] = {0};
+	char addr_list[1024 * 2] = {0};
 
 	for (int i = 0; i < num_addresses; i++) {
 		strncat(addr_list, addresses[i], sizeof(addr_list) - strlen(addr_list) - 2);
 		if (i < num_addresses - 1) strncat(addr_list, "|", sizeof(addr_list) - strlen(addr_list) - 2);
 	}
-printf("Addr_List: %s\n", addr_list);
+//printf("Addr_List: %s\n", addr_list);
 	char url[2048];
 	snprintf(url, sizeof(url), "https://blockchain.info/multiaddr?active=%s", addr_list);
 	
@@ -629,14 +631,14 @@ printf("Addr_List: %s\n", addr_list);
 	return total_balance;
 }
 
-long long get_account_balance(key_pair_t *master_key, time_t *last_request) {
+long long get_account_balance(key_pair_t *master_key, uint32_t account_index, time_t *last_request) {
 	char **addresses = NULL;
-	addresses = gcry_malloc_secure(ACCOUNTS_CAPACITY * GAP_LIMIT * 2 * sizeof(char *)); // 42 bytes per address (including comma) * 2 chains
+	addresses = gcry_malloc_secure(GAP_LIMIT * 2 * sizeof(char *)); // 42 bytes per address (including comma) * 2 chains
 	if (!addresses) {
 		fprintf(stderr, "Failed to allocate addresses array\n");
 		return -1;
 	}
-	for (size_t i = 0; i < ACCOUNTS_CAPACITY * GAP_LIMIT * 2; i++) {
+	for (size_t i = 0; i < GAP_LIMIT * 2; i++) {
 		// Allocate each of the 200 addresses and NULL it
 		char *address = (char *)gcry_malloc_secure(sizeof(char) * ADDRESS_MAX_LEN);
 		if (address == NULL) {
@@ -650,48 +652,46 @@ long long get_account_balance(key_pair_t *master_key, time_t *last_request) {
 	}
 	int addr_count = 0;
 	int result;
-	// For each account index
-	for (uint32_t account_index = 0; account_index < ACCOUNTS_CAPACITY; account_index++) {
-		key_pair_t *account_key = NULL;
-		account_key = gcry_malloc_secure(sizeof(key_pair_t));
-		if (!account_key) {
+	key_pair_t *account_key = NULL;
+	account_key = gcry_malloc_secure(sizeof(key_pair_t));
+	if (!account_key) {
+		fprintf(stderr, "Error gcry_malloc_secure\n");
+		for (int j = 0; j < addr_count; j++) gcry_free(addresses[j]);
+		gcry_free(addresses);
+		return -1;
+	}
+	result = derive_from_public_to_account(master_key, account_index, account_key); 
+	if (result != 0) {
+		fprintf(stderr, "Failure deriving account key\n");
+		for (int j = 0; j < addr_count; j++) gcry_free(addresses[j]);
+		gcry_free(addresses);
+		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
+		return -1;
+	}
+	for (uint32_t change = 0; change < 2; change++) { // 0 for external, 1 for internal
+		// Generate the change (chain)
+		key_pair_t *change_key = NULL;
+		change_key = gcry_malloc_secure(sizeof(key_pair_t));
+		if (!change_key) {
 			fprintf(stderr, "Error gcry_malloc_secure\n");
-			for (int j = 0; j < addr_count; j++) gcry_free(addresses[j]);
-			gcry_free(addresses);
-			return -1;
-		}
-		result = derive_from_public_to_account(master_key, account_index, account_key); 
-		if (result != 0) {
-			fprintf(stderr, "Failure deriving account key\n");
 			for (int j = 0; j < addr_count; j++) gcry_free(addresses[j]);
 			gcry_free(addresses);
 			zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
 			return -1;
 		}
-		for (uint32_t change = 0; change < 2; change++) { // 0 for external, 1 for internal
-			// Generate the change (chain)
-			key_pair_t *change_key = NULL;
-			change_key = gcry_malloc_secure(sizeof(key_pair_t));
-			if (!change_key) {
-				fprintf(stderr, "Error gcry_malloc_secure\n");
-				for (int j = 0; j < addr_count; j++) gcry_free(addresses[j]);
-				gcry_free(addresses);
-				zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
-				return -1;
-			}
-			result = derive_from_account_to_change(account_key, change, change_key); // m'/44'/0'/account'/change	
-			if (result != 0) {
-				fprintf(stderr, "Failure deriving child key\n");
-				for (int j = 0; j < addr_count; j++) gcry_free(addresses[j]);
-				gcry_free(addresses);
-				zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
-				return -1;
-			}
-			// For each change (chain), go through all the indexes
-			for (uint32_t child_index = 0; child_index < (uint32_t) GAP_LIMIT; child_index++) {
-				key_pair_t *child_key = NULL;
-				child_key = gcry_malloc_secure(sizeof(key_pair_t));
-				if (!child_key) {
+		result = derive_from_account_to_change(account_key, change, change_key); // m'/44'/0'/account'/change	
+		if (result != 0) {
+			fprintf(stderr, "Failure deriving child key\n");
+			for (int j = 0; j < addr_count; j++) gcry_free(addresses[j]);
+			gcry_free(addresses);
+			zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
+			return -1;
+		}
+		// For each change (chain), go through all the indexes
+		for (uint32_t child_index = 0; child_index < (uint32_t) GAP_LIMIT; child_index++) {
+			key_pair_t *child_key = NULL;
+			child_key = gcry_malloc_secure(sizeof(key_pair_t));
+			if (!child_key) {
 					fprintf(stderr, "Error gcry_malloc_secure\n");
 					for (int k = 0; k < addr_count; k++) gcry_free(addresses[k]);
 					gcry_free(addresses);
@@ -719,8 +719,13 @@ long long get_account_balance(key_pair_t *master_key, time_t *last_request) {
 			}
 			zero_and_gcry_free((void *)change_key, sizeof(key_pair_t));
 		}
-		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
-	}
+	zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
+/*
+printf("All addresses-\n");
+for (int i = 0; i < addr_count; i++) {
+	printf("%d: %s\n", i + 1, addresses[i]);
+}
+*/
     	long long balance = get_balance((const char **)addresses, addr_count, last_request);
     	for (int k = 0; k < addr_count; k++) gcry_free(addresses[k]);
     	gcry_free(addresses);
