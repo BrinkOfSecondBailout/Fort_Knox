@@ -5,6 +5,7 @@
 #include "wallet.h"
 #include "crypt.h"
 #include "mnemonic.h"
+#include "utxo.h"
 #include "curl/curl.h"
 
 void print_logo() {
@@ -493,8 +494,8 @@ int32 balance_handle(User *user) {
 		"%lld satoshis (%.8f BTC)\n"
 		"%.2f dollars (most recent price: $%.2f)\n",
 		account_index,
-		balance, balance / SATS_IN_BITCOIN, 
-		(balance / SATS_IN_BITCOIN) * user->last_price_cached, 
+		balance, balance / SATS_PER_BTC, 
+		(balance / SATS_PER_BTC) * user->last_price_cached, 
 		user->last_price_cached);
     	} else {
 		printf("Failed to retrieve balance\n");
@@ -609,6 +610,191 @@ int32 send_handle(User *user) {
 		"Type 'new' or 'recover' to begin\n");
 		return 1;
 	}
+	printf("For the purpose of keeping this app simple and less memory/complexity intensive,\n"
+		"we will scan up to 20 child key index addresses per account.\n"
+		"This means the UTXOs queried will reflect only of your selected account (up to index 20 of each account).\n"
+		"Note: if you have funds in a different account index or if one of your address\n"
+		"key index is higher than 20 you will not see those funds reflected in this UTXOs query.\n"
+		"This does not necessarily mean that the funds aren't in your wallet associated with your seed phrase, however.\n");
+	char cmd[256];
+	uint32_t account_index;
+	while(1) {
+		printf("Please enter the account number you'd like to see the balance of (between 0 - 100)\n> ");
+		zero((void *)cmd, 256);
+		if (!fgets(cmd, 256, stdin)) {
+			fprintf(stderr, "Failure reading account number\n");
+			return 1;
+		}
+		cmd[strlen(cmd) - 1] = '\0';
+		int j = 0;
+		while (cmd[j] != '\0') {
+			cmd[j] = tolower((unsigned char)cmd[j]);
+			j++;
+		}
+		if (strcmp(cmd, "exit") == 0) exit_handle(user);
+		if (atoi(cmd) < 0 || atoi(cmd) > 100) {
+			fprintf(stderr, "Enter a valid account number between 0 - 100.\n");
+		} else {
+			account_index = (uint32_t)atoi(cmd);
+			break;
+		}
+	}
+	printf("Please wait while we query the blockchain for your UTXOs' balance...(account %u)\n", account_index);
+	utxo_t *utxos = NULL;
+	int num_utxos = 0;
+	long long total_balance = get_utxos(user->master_key, &utxos, &num_utxos, account_index, &user->last_api_request);
+	if (total_balance < 0) {
+		fprintf(stderr, "Failed to fetch UTXOs.\n");
+		return 1;
+	}
+	printf("Available balance:\n"
+		"%lld satoshis (%.8f BTC)\n"
+		"%.2f dollars (most recent price: $%.2f)\n",
+		total_balance,(double)total_balance / SATS_PER_BTC,
+		((double)total_balance / SATS_PER_BTC) * user->last_price_cached, user->last_price_cached);
+	if (total_balance == 0) {
+		printf("No sats to send.\n");
+		return 0;
+	}
+	char recipient1[ADDRESS_MAX_LEN];
+	char recipient2[ADDRESS_MAX_LEN];
+	long long amount;
+	while (1) {
+		printf("Enter recipient address, be sure to verify thoroughly.\n> ");
+		zero((void *)recipient1, ADDRESS_MAX_LEN);
+		zero((void *)recipient2, ADDRESS_MAX_LEN);
+		if (!fgets(recipient1, ADDRESS_MAX_LEN, stdin)) {
+			fprintf(stderr, "Error reading command\n");
+			continue;
+		}
+		printf("Enter recipient address again, make sure it matches your first input.\n> ");	
+		if (!fgets(recipient2, ADDRESS_MAX_LEN, stdin)) {
+			fprintf(stderr, "Error reading command\n");
+			continue;
+		}
+		if (strncmp(recipient1, recipient2, ADDRESS_MAX_LEN) != 0) {
+			fprintf(stderr, "Inputs not matching. Try again\n");
+			continue;
+		} else {
+			printf("Got it!\n");
+			break;
+		}
+	}
+	while (1) {
+		zero((void *)cmd, 256);
+		printf("Enter amount you wish to send in satoshis:\n> ");
+		if (!fgets(cmd, 256, stdin)) {
+			fprintf(stderr, "Error reading command\n");
+			continue;
+		}
+		amount = (long long)atoi(cmd);
+		if (amount < (long long) 0 || amount < total_balance) {
+			fprintf(stderr, "Invalid amount, must be more than 0 and less than your total balance.\n");
+			continue;
+		} else {
+			printf("Got it!\n");
+			break;
+		}
+	}
+	long long regular_rate;
+	long long priority_rate;
+	long long fee;
+	
+	if (get_fee_rate(&regular_rate, &priority_rate, &user->last_api_request) != 0) {
+		fprintf(stderr, "Fee rate fetch failed.\n");
+		return 1;
+	}
+	printf("Here are the current market fee rates (in satoshis):\n"
+		"Regular (per bytes): %lld (%.8f BTC)\n"
+		"Priority (per bytes): %lld (%.8f BTC)\n"
+		"Regular total fee (estimated for typical transaction of 1 input and 2 outputs):\n"
+		"%lld\n"
+		"Priority total fee (estimated for typical transaction of 1 input and 2 outputs):\n"
+		"%lld\n",
+		regular_rate, regular_rate / SATS_PER_BTC,
+		priority_rate, priority_rate / SATS_PER_BTC,
+		regular_rate * (long long)estimated_transaction_size(1, 2),
+		priority_rate * (long long)estimated_transaction_size(1, 2));
+	printf("\nHow much would you like to spend on fees?\n"
+		"Keep in mind, the higher you spend, the faster your transaction will be added to the next block.\n"
+		"If you choose the regular fee rate, confirmation time will be ~1 hour.\n"
+		"Or if you choose the priority rate, confirmation time will be ~10 minutes.\n"
+		"You can choose a number lower than the regular rate, but that may leave your transaction in limbo for"
+		" a long, indefinite, undefined amount of time\n");
+	while (1) {
+		printf("Enter how much you'd like to pay for miner fees (in satoshis): \n> ");
+		zero((void *)cmd, 256);
+		if (!fgets(cmd, 256, stdin)) {
+			fprintf(stderr, "Error reading command\n");
+			continue;
+		}
+		fee = (long long)atoi(cmd);
+		if (fee < (long long) 0 || fee + amount < total_balance) {
+			fprintf(stderr, "Invalid fee chosen, must be above 0 and less than total balance when added with amount to be sent.\n");
+			continue;
+		} else {
+			printf("Got it!\n");	
+			break;
+		}
+	}
+	utxo_t *selected = NULL;
+	int num_selected = 0;
+	long long input_sum = 0;
+	result = select_coins(utxos, num_utxos, amount, fee, &selected, &num_selected, &input_sum);
+	if (result != 0) {
+		printf("Coin selection failed\n");
+		for (int i = 0; i < num_utxos; i++) gcry_free(utxos[i].key);
+		if (num_selected > 0) gcry_free(selected);
+		gcry_free(utxos);
+		return 1;
+	}
+	long long change = input_sum - amount - fee;
+	key_pair_t *change_back_key = NULL;
+	change_back_key = gcry_malloc_secure(sizeof(key_pair_t));
+	if (!change_back_key) {
+		fprintf(stderr, "Change back key allocation failed\n");
+		for (int i = 0; i < num_utxos; i++) gcry_free(utxos[i].key);
+		if (num_selected > 0) gcry_free(selected);
+		gcry_free(utxos);
+		return 1;
+	}
+	if (change > 0) {
+		uint32_t change_index = user->accounts[account_index]->used_indexes_count;
+		result = derive_from_public_to_account(user->master_key, account_index, change_back_key); 
+		if (result != 0) {
+			fprintf(stderr, "Child key derivation failed\n");
+			for (int i = 0; i < num_utxos; i++) gcry_free(utxos[i].key);
+			if (num_selected > 0) gcry_free(selected);
+			gcry_free(change_back_key);
+			gcry_free(utxos);
+			return 1;
+		}
+		result = derive_from_account_to_change(change_back_key, 1, change_key);
+		if (result != 0) {
+			fprintf(stderr, "Child key derivation failed\n");
+			for (int i = 0; i < num_utxos; i++) gcry_free(utxos[i].key);
+			if (num_selected > 0) gcry_free(selected);
+			gcry_free(change_back_key);
+			gcry_free(utxos);
+			return 1;
+		}
+		result = derive_from_change_to_child(change_back_key, change_index, change_back_key);
+		if (result != 0) {
+			fprintf(stderr, "Child key derivation failed\n");
+			for (int i = 0; i < num_utxos; i++) gcry_free(utxos[i].key);
+			if (num_selected > 0) gcry_free(selected);
+			gcry_free(change_back_key);
+			gcry_free(utxos);
+			return 1;
+		}
+		user->accounts[account_index]->used_indexes_count++;
+	}	
+	char *raw_tx_hex = NULL;
+	result = build_transaction(recipient, amount, selected, num_selected, change_back_key, fee, &raw_tx_hex);
+//	sign_transaction();
+//	broadcast_transaction();	
+		
+		
 	return 0;
 }
 

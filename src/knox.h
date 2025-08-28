@@ -4,8 +4,6 @@
 #define KNOX_H
 #include "wallet.h"
 
-#define SATS_IN_BITCOIN 100000000.0
-
 typedef unsigned int int32;
 
 typedef struct {

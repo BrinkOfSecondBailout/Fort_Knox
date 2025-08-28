@@ -49,6 +49,7 @@ void hex_to_bytes(const char *hex, uint8_t *bytes, size_t len) {
     	}
 }
 
+
 void resize_convert_hex_to_bytes(const char *hex, uint8_t *bytes) {
 	size_t hex_halved = strlen(hex) / 2;
 	hex_to_bytes(hex, bytes, hex_halved);
@@ -549,7 +550,7 @@ int derive_from_public_to_account(const key_pair_t *pub_key, uint32_t account_in
 } 
 
 // Matching the parameters prototype of how curl expects their callback function
-static size_t curl_write_callback_func(void *contents, size_t size, size_t nmemb, void *userdata) {
+size_t curl_write_callback_func(void *contents, size_t size, size_t nmemb, void *userdata) {
 	// Must match and return this size (bytes) for 'success'
 	size_t realsize = size * nmemb;
 	curl_buffer_t *mem = (curl_buffer_t *)userdata;
@@ -578,8 +579,8 @@ double get_bitcoin_price(time_t *last_request) {
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buffer);
 
 	time_t now = time(NULL);
-	if (*last_request != 0 && difftime(now, *last_request) < 30) {
-		int sleep_time = 30 - (int)difftime(now, *last_request);
+	if (*last_request != 0 && difftime(now, *last_request) < SECS_PER_REQUEST) {
+		int sleep_time = SECS_PER_REQUEST - (int)difftime(now, *last_request);
 		printf("Rate limit: 1 request per 30 seconds...\nWaiting %d seconds...\n", sleep_time);
 		sleep(sleep_time);
 	}
@@ -644,8 +645,8 @@ long long get_balance(const char **addresses, int num_addresses, time_t *last_re
     	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buffer);
 
 	time_t now = time(NULL);
-	if (*last_request != 0 && difftime(now, *last_request) < 30) {
-		int sleep_time = 30 - (int)difftime(now, *last_request);
+	if (*last_request != 0 && difftime(now, *last_request) < SECS_PER_REQUEST) {
+		int sleep_time = SECS_PER_REQUEST - (int)difftime(now, *last_request);
 		printf("Rate limit: 1 request per 30 seconds...\nWaiting %d seconds...\n", sleep_time);
 		sleep(sleep_time);
 	}
@@ -684,13 +685,13 @@ long long get_balance(const char **addresses, int num_addresses, time_t *last_re
 
 long long get_account_balance(key_pair_t *master_key, uint32_t account_index, time_t *last_request) {
 	char **addresses = NULL;
-	addresses = gcry_malloc_secure(GAP_LIMIT * 2 * sizeof(char *)); // 42 bytes per address (including comma) * 2 chains
+	addresses = gcry_malloc_secure(GAP_LIMIT * 2 * sizeof(char *));
 	if (!addresses) {
 		fprintf(stderr, "Failed to allocate addresses array\n");
 		return -1;
 	}
 	for (size_t i = 0; i < GAP_LIMIT * 2; i++) {
-		// Allocate each of the 200 addresses and NULL it
+		// Allocate each of the 40 addresses and NULL it
 		char *address = (char *)gcry_malloc_secure(sizeof(char) * ADDRESS_MAX_LEN);
 		if (address == NULL) {
 			for (int j = 0; j < i; j++) gcry_free(addresses[j]);

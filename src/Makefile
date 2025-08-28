@@ -1,7 +1,7 @@
 CC = gcc
 CFLAGS = -Wall -g -O2 $(shell pkg-config --cflags libgcrypt libcurl)
 LDFLAGS = $(shell pkg-config --libs libgcrypt libcurl jansson)
-SOURCES = knox.c crypt.c wallet.c mnemonic.c
+SOURCES = knox.c crypt.c wallet.c mnemonic.c utxo.c
 OBJECTS = $(SOURCES:.c=.o)
 TARGET = knox
 

@@ -4,8 +4,10 @@
 #ifndef WALLET_H
 #define WALLET_H
 
+#define SATS_PER_BTC 100000000.0
 #define N_VALUE_HEX "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141"
 #define HARD_FLAG 0x80000000
+#define SECS_PER_REQUEST 30
 
 #define ACCOUNTS_CAPACITY 5
 #define INITIAL_USED_INDEXES_CAPACITY 20
@@ -53,6 +55,7 @@ int derive_child_key(const key_pair_t *, uint32_t, key_pair_t *);
 int derive_from_change_to_child(const key_pair_t *, uint32_t, key_pair_t *);
 int derive_from_account_to_change(const key_pair_t *, uint32_t, key_pair_t *);
 int derive_from_public_to_account(const key_pair_t *, uint32_t, key_pair_t *);
+size_t curl_write_callback_func(void *, size_t, size_t, void *);
 double get_bitcoin_price(time_t*);
 long long get_account_balance(key_pair_t *, uint32_t, time_t*);
 
