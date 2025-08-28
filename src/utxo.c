@@ -418,7 +418,7 @@ int bech32_decode(const char *address, uint8_t *program, size_t *program_len) {
 	// Decode data part
 	uint8_t values[len - hrp_len - 1];
 	size_t values_len = 0;
-	for (const char *p = sep + 1; *p; p++) {
+	for (const char *p = separator + 1; *p; p++) {
 		int v = bech32_decode_char(*p);
 		if (v < 0) return -1;
 		values[values_len++] = v;
@@ -459,7 +459,7 @@ int address_to_scriptpubkey(const char *address, uint8_t *script, size_t *script
 
 int build_transaction(const char *recipient, long long amount, utxo_t *selected, int num_selected, key_pair_t *change_back_key, long long fee, char **raw_tx_hex) {
 	if (!recipient || amount <= 0 || !selected || num_selected <= 0 || fee < 0 || !raw_tx_hex) {
-		fprintf(stderr, "Invalid inputs\n")
+		fprintf(stderr, "Invalid inputs\n");
 		return 1;
 	}
 	// Validate funds
@@ -486,8 +486,105 @@ int build_transaction(const char *recipient, long long amount, utxo_t *selected,
 	}
 	size_t pos = 0;
 	// Version (2 for segwit)
-	
-
+	encode_uint32_le(2, buffer + pos);
+	pos += 4;
+	// Marker and flag
+	buffer[pos++] = 0x00;
+	buffer[pos++] = 0x01;
+	// Input count
+	uint8_t varint_buf[9];
+	size_t varint_len;
+	if (encode_varint(num_selected, varint_buf, &varint_len) != 0) {
+		free(buffer);
+		fprintf(stderr, "Failed to encode input count\n");
+		return 1;
+	}	
+	memcpy(buffer + pos, varint_buf, varint_len);
+	pos += varint_len;
+	// Inputs
+	for (int i = 0; i < num_selected; i++) {
+		// TxId (reversed)
+		uint8_t txid_bytes[32];
+		hex_to_bytes(selected[i].txid, txid_bytes, 32);
+		for (int j = 0; j < 32; j++) {
+			buffer[pos + j] = txid_bytes[31 - j];
+		}
+		pos += 32;
+		// vout
+		encode_uint32_le(selected[i].vout, buffer + pos);
+		pos += 4;
+		// ScriptSig (empty for P2WPKWH)
+		buffer[pos++] = 0x00;
+		// Sequence
+		encode_uint32_le(0xffffffff, buffer + pos);
+		pos += 4;
+	}
+	// Output count
+	if (encode_varint(num_outputs, varint_buf, &varint_len) != 0) {
+		free(buffer);
+		fprintf(stderr, "Failed to encode output count\n");
+		return 1;
+	}
+	memcpy(buffer + pos, varint_buf, varint_len);
+	pos += varint_len;
+	// Outputs
+	// Recipient output
+	uint8_t script[25];
+	size_t script_len;
+	if (address_to_scriptpubkey(recipient, script, &script_len) != 0) {
+		free(buffer);
+		fprintf(stderr, "Failed to convert recipient address\n");
+		return 1;
+	}
+	encode_uint64_le(amount, buffer + pos);
+	pos += 8;
+	memcpy(buffer + pos, script, script_len);
+	pos += script_len;
+	// Change output
+	if (change > 0) {
+		if (!change_back_key) {
+			free(buffer);
+			fprintf(stderr, "Change required but no change key provided\n");
+			return 1;
+			
+		}
+		char change_address[ADDRESS_MAX_LEN];
+		if (pubkey_to_address(change_back_key->key_pub_compressed, PUBKEY_LENGTH, change_address, ADDRESS_MAX_LEN) != 0) {
+			free(buffer);
+			fprintf(stderr, "Failed to convert change address\n");
+			return 1;
+		}
+		if (address_to_scriptpubkey(change_address, script, &script_len) != 0) {
+			free(buffer);
+			fprintf(stderr, "Failed to convert change scriptpubkey\n");
+			return 1;
+		}
+		encode_uint64_le(change, buffer + pos);
+		pos += 8;
+		memcpy(buffer + pos, script, script_len);
+		pos += script_len;
+	}
+	// Witness placeholder
+	for (int i = 0; i < num_selected; i++) {
+		buffer[pos++] = 0x02; // 2 witness items(signature + pubkey)
+		buffer[pos++] = 0x00; // Placeholder for signature
+		buffer[pos++] = 0x00; // Placeholder for pubkey
+	}
+	// Locktime
+	encode_uint32_le(0, buffer + pos);
+	pos += 4;
+	// Convert to hex
+	*raw_tx_hex = malloc(pos * 2 + 1);
+	if (!*raw_tx_hex) {
+		free(buffer);
+		fprintf(stderr, "Failed to allocate raw_tx_hex\n");
+		return 1;
+	}
+	for (size_t i = 0; i < pos; i++) {
+		sprintf(*raw_tx_hex + i * 2, "%02x", buffer[i]);
+	}
+	(*raw_tx_hex)[pos * 2] = '\0';
+	free(buffer);
 	return 0;
 }
 

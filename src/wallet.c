@@ -617,13 +617,55 @@ double get_bitcoin_price(time_t *last_request) {
     	return price;
 }
 
-// Get total balance for a list of addresses (in satoshis)
-long long get_balance(const char **addresses, int num_addresses, time_t *last_request) {
-	printf("Querying the blockchain for 20 Bech32-P2WPKH addresses (external and internal chain) associated with this wallet account...\n");
-	if (*addresses[0] == '\0' || num_addresses == 0) {
-		fprintf(stderr, "Addresses invalid.\n");
+int parse_json_for_any_transaction(char *json_data) {
+	json_error_t error;
+	json_t *root = json_loads(json_data, 0, &error);
+	if (!root) {
+		fprintf(stderr, "JSON parse error: %s\n", error.text);
 		return -1;
 	}
+	json_t *addresses_array = json_object_get(root, "addresses");
+	if (json_is_array(addresses_array)) {
+		for (size_t i = 0; i < json_array_size(addresses_array); i++) {
+			json_t *addr_obj = json_array_get(addresses_array, i);
+			json_t *n_tx = json_object_get(addr_obj, "n_tx");
+			if (json_is_integer(n_tx)) {
+				int n = json_integer_value(n_tx);
+				if (n > 0) {
+					json_decref(root);
+					return 1;
+				}
+			}
+		}
+	}
+	json_decref(root);
+	return 0;
+}
+
+long long parse_json_for_total_balance(char *json_data) {
+	// Parse JSON for total balance
+	long long total_balance = 0;
+	json_error_t error;
+	json_t *root = json_loads(json_data, 0, &error);
+	if (!root) {
+		fprintf(stderr, "JSON parse error: %s\n", error.text);
+		return -1;
+	}
+	json_t *addresses_array = json_object_get(root, "addresses");
+	if (json_is_array(addresses_array)) {
+		for (size_t i = 0; i < json_array_size(addresses_array); i++) {
+			json_t *addr_obj = json_array_get(addresses_array, i);
+			json_t *balance = json_object_get(addr_obj, "final_balance");
+			if (json_is_integer(balance)) {
+				total_balance += json_integer_value(balance);
+			}
+		}
+	}
+	json_decref(root);
+	return total_balance;
+}
+
+int init_curl_and_addresses(const char **addresses, int num_addresses, curl_buffer_t *buffer, time_t *last_request) {
 	// Set a curl handle for the data transfer
 	CURL *curl = curl_easy_init();
 	if (!curl) return -1;
@@ -639,10 +681,9 @@ long long get_balance(const char **addresses, int num_addresses, time_t *last_re
 	snprintf(url, sizeof(url), "https://blockchain.info/multiaddr?active=%s", addr_list);
 	
 	// Set the behaviors for the curl handle
-	curl_buffer_t buffer = {0};
 	curl_easy_setopt(curl, CURLOPT_URL, url);
     	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_callback_func);
-    	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buffer);
+    	curl_easy_setopt(curl, CURLOPT_WRITEDATA, buffer);
 
 	time_t now = time(NULL);
 	if (*last_request != 0 && difftime(now, *last_request) < SECS_PER_REQUEST) {
@@ -657,30 +698,27 @@ long long get_balance(const char **addresses, int num_addresses, time_t *last_re
 
     	if (res != CURLE_OK) {
 		fprintf(stderr, "CURL failed: %s\n", curl_easy_strerror(res));
-        	free(buffer.data);
+        	free(buffer->data);
         	return -1;
     	}
-	// Parse JSON for total balance
-	json_error_t error;
-	json_t *root = json_loads(buffer.data, 0, &error);
-	free(buffer.data);
-	if (!root) {
-		fprintf(stderr, "JSON parse error: %s\n", error.text);
+	return 0;
+}
+// Get total balance for a list of addresses (in satoshis)
+long long get_balance(const char **addresses, int num_addresses, time_t *last_request) {
+	printf("Querying the blockchain for 20 Bech32-P2WPKH addresses (external and internal chain) associated with this wallet account...\n");
+	if (*addresses[0] == '\0' || num_addresses == 0) {
+		fprintf(stderr, "Addresses invalid.\n");
 		return -1;
 	}
-	long long total_balance = 0;
-	json_t *addresses_array = json_object_get(root, "addresses");
-	if (json_is_array(addresses_array)) {
-		for (size_t i = 0; i < json_array_size(addresses_array); i++) {
-			json_t *addr_obj = json_array_get(addresses_array, i);
-			json_t *balance = json_object_get(addr_obj, "final_balance");
-			if (json_is_integer(balance)) {
-				total_balance += json_integer_value(balance);
-			}
-		}
+	curl_buffer_t buffer = {0};
+	int result = init_curl_and_addresses(addresses, num_addresses, &buffer, last_request);
+	if (result != 0) {
+		fprintf(stderr, "Failed to initialize curl and addresses\n");
+		return -1;
 	}
-	json_decref(root);
-	return total_balance;
+	long long balance = parse_json_for_total_balance(buffer.data);
+	free(buffer.data);
+	return balance;
 }
 
 long long get_account_balance(key_pair_t *master_key, uint32_t account_index, time_t *last_request) {
@@ -744,44 +782,115 @@ long long get_account_balance(key_pair_t *master_key, uint32_t account_index, ti
 			key_pair_t *child_key = NULL;
 			child_key = gcry_malloc_secure(sizeof(key_pair_t));
 			if (!child_key) {
-					fprintf(stderr, "Error gcry_malloc_secure\n");
-					for (int k = 0; k < addr_count; k++) gcry_free(addresses[k]);
-					gcry_free(addresses);
-					zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
-					return -1;
-				}
-				result = derive_from_change_to_child(change_key, child_index, child_key); // m/44'/0'/account'/change/index
-				if (result != 0) {
-					fprintf(stderr, "Failed to derive child key\n");
-					for (int k = 0; k < addr_count; k++) gcry_free(addresses[k]);
-					gcry_free(addresses);
-					zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);
-					return -1;
-				}
-				result = pubkey_to_address(child_key->key_pub_compressed, PUBKEY_LENGTH, addresses[addr_count], ADDRESS_MAX_LEN);
-				if (result != 0) {
-					fprintf(stderr, "Failed to generate address\n");
-					for (int k = 0; k < addr_count; k++) gcry_free(addresses[k]);
-					gcry_free(addresses);
-					zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);
-					return -1;
-				}
-				addr_count++;
-				zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
+				fprintf(stderr, "Error gcry_malloc_secure\n");
+				for (int k = 0; k < addr_count; k++) gcry_free(addresses[k]);
+				gcry_free(addresses);
+				zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
+				return -1;
 			}
-			zero_and_gcry_free((void *)change_key, sizeof(key_pair_t));
+			result = derive_from_change_to_child(change_key, child_index, child_key); // m/44'/0'/account'/change/index
+			if (result != 0) {
+				fprintf(stderr, "Failed to derive child key\n");
+				for (int k = 0; k < addr_count; k++) gcry_free(addresses[k]);
+				gcry_free(addresses);
+				zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);
+				return -1;
+			}
+			result = pubkey_to_address(child_key->key_pub_compressed, PUBKEY_LENGTH, addresses[addr_count], ADDRESS_MAX_LEN);
+			if (result != 0) {
+				fprintf(stderr, "Failed to generate address\n");
+				for (int k = 0; k < addr_count; k++) gcry_free(addresses[k]);
+				gcry_free(addresses);
+				zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);
+				return -1;
+			}
+			addr_count++;
+			zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
 		}
+		zero_and_gcry_free((void *)change_key, sizeof(key_pair_t));
+	}
 	zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
-/*
-printf("All addresses-\n");
-for (int i = 0; i < addr_count; i++) {
-	printf("%d: %s\n", i + 1, addresses[i]);
-}
-*/
     	long long balance = get_balance((const char **)addresses, addr_count, last_request);
     	for (int k = 0; k < addr_count; k++) gcry_free(addresses[k]);
     	gcry_free(addresses);
 	return balance;		
 }
 
+int scan_one_accounts_external_chain(key_pair_t *master_key, uint32_t account_index, time_t *last_request) {
+	char **addresses = NULL;
+	int addr_count = 0;
+	addresses = gcry_malloc_secure(GAP_LIMIT * sizeof(char *));
+	if (!addresses) {
+		fprintf(stderr, "Failed to allocate addresses array\n");
+		return -1;
+	}
+	for (int i = 0; i < GAP_LIMIT; i++) {
+		// Allocate each of the 40 addresses and NULL it
+		char *address = (char *)gcry_malloc_secure(sizeof(char) * ADDRESS_MAX_LEN);
+		if (address == NULL) {
+			for (int j = 0; j < i; j++) gcry_free(addresses[j]);
+			gcry_free(addresses);
+			fprintf(stderr, "Error allocating address\n");
+			return -1;
+		}
+		address[0] = '\0';
+		addresses[i] = address;
+	}
+
+	key_pair_t *child_key = NULL;
+	child_key = gcry_malloc_secure(sizeof(key_pair_t));
+	if (!child_key) {
+		fprintf(stderr, "Failure allocating child key\n");
+		for (int j = 0; j < addr_count; j++) gcry_free(addresses[j]);
+		gcry_free(addresses);
+		return -1;
+	}
+	int result = derive_from_public_to_account(master_key, account_index, child_key);
+	if (result != 0) {
+		fprintf(stderr, "Error deriving child key\n");
+		for (int j = 0; j < addr_count; j++) gcry_free(addresses[j]);
+		gcry_free(addresses);
+		zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
+		return -1;
+	}
+	result = derive_from_account_to_change(child_key, (uint32_t)0, child_key);
+	if (result != 0) {
+		fprintf(stderr, "Error deriving child key\n");
+		for (int j = 0; j < addr_count; j++) gcry_free(addresses[j]);
+		gcry_free(addresses);
+		zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
+		return -1;
+	}
+	for (uint32_t index = 0; index < (uint32_t)GAP_LIMIT; index++) {
+		result = derive_from_change_to_child(child_key, index, child_key);
+		if (result != 0) {
+			fprintf(stderr, "Error deriving child key\n");
+			for (int j = 0; j < addr_count; j++) gcry_free(addresses[j]);
+			gcry_free(addresses);
+			zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
+			return -1;
+		}
+		result = pubkey_to_address(child_key->key_pub_compressed, PUBKEY_LENGTH, addresses[addr_count], ADDRESS_MAX_LEN);
+		if (result != 0) {
+			fprintf(stderr, "Failed to generate address\n");
+			for (int k = 0; k < addr_count; k++) gcry_free(addresses[k]);
+			gcry_free(addresses);
+			zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
+			return -1;
+		}
+		addr_count++;	
+	}
+	curl_buffer_t buffer = {0};
+	result = init_curl_and_addresses((const char **)addresses, addr_count, &buffer, last_request);
+	if (result != 0) {
+		fprintf(stderr, "Failed to initialize curl and addresses\n");
+		return -1;
+	}
+	if (parse_json_for_any_transaction(buffer.data) > 0 ) {
+		printf("Account %d have previous transactions on the blockchain.\n", (int)account_index);
+		return 1;	
+	}
+	printf("Account %d have no recorded transactions on the blockchain, we recommend using this account instead.\n", (int)account_index);
+	return 0;
+}
 

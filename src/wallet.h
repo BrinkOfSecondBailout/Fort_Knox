@@ -9,7 +9,7 @@
 #define HARD_FLAG 0x80000000
 #define SECS_PER_REQUEST 30
 
-#define ACCOUNTS_CAPACITY 5
+#define ACCOUNTS_CAPACITY 3
 #define INITIAL_USED_INDEXES_CAPACITY 20
 #define SEED_LENGTH 64
 #define PRIVKEY_LENGTH 32
@@ -44,6 +44,7 @@ void zero(void *, size_t);
 void zero_multiple(void *, ...);
 void zero_and_gcry_free(void *, size_t);
 void zero_and_gcry_free_multiple(size_t, void *, ...);
+void convert_bits(uint8_t *, size_t *, const uint8_t *, size_t, int, int, int);
 void hex_to_bytes(const char *, uint8_t *, size_t);
 void resize_convert_hex_to_bytes(const char *, uint8_t *);
 void print_bytes_as_hex(const char *, const uint8_t *, size_t);
@@ -58,5 +59,5 @@ int derive_from_public_to_account(const key_pair_t *, uint32_t, key_pair_t *);
 size_t curl_write_callback_func(void *, size_t, size_t, void *);
 double get_bitcoin_price(time_t*);
 long long get_account_balance(key_pair_t *, uint32_t, time_t*);
-
+int scan_one_accounts_external_chain(key_pair_t *, uint32_t, time_t *);
 #endif

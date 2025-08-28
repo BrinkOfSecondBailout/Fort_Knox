@@ -466,7 +466,10 @@ int32 balance_handle(User *user) {
 	char cmd[256];
 	uint32_t account_index;
 	while(1) {
-		printf("Please enter the account number you'd like to see the balance of (between 0 - 100)\n> ");
+		printf("Please enter the account number you'd like to see the balance of (between 0 - 100)\n"
+			"Keep in mind that on this app, you are limited to only receiving funds on account 0-3,\n"
+			"If you use a higher account on a different wallet software, we can scan it here, (up to 20 indexes).\n"
+			"> ");
 		zero((void *)cmd, 256);
 		if (!fgets(cmd, 256, stdin)) {
 			fprintf(stderr, "Failure reading account number\n");
@@ -510,18 +513,21 @@ int32 receive_handle(User *user) {
 		"Type 'new' or 'recover' to begin\n");
 		return 1;
 	}
+	int result;
 	char cmd[256];
 	uint32_t account_index;
-	printf("Do you have a preference on what account to use?\n"
-		"We recommend keeping it at 0 as per the BIP44 standard, but enter any number you wish between 0 - 5.\n"
+	printf("What account do you want to use?\n"
+		"We recommend using account 0 as per the BIP44 standard, but enter any number you wish between 0 - 3.\n"
 		"We try to keep track of your used accounts for you, but you must also be responsible for them yourself\n"
 		"Some bitcoiners prefer keeping accounts separate for different purposes,\n"
 		"For ex: 0 for checkings, 1 for savings, 2 for donations, etc...\n"
-		"To keep this app simple, we limit the number of accounts you can use to 5.\n"
-		"To keep it simple, just use 0.\n");
+		"To keep this app simple, we limit the number of accounts you can use to 3.\n"
+		"Please keep in mind that your account selection must be sequential, starting from 0,\n"
+		"This means if you if you try to enter '1' but account '0' has zero transactions, we will alert you\n"
+		"that account 0 should be used instead.\n");
 	while (1) {
 		zero((void*)cmd, sizeof(cmd));
-		printf("Enter account number between 0-5 (recommended: 0) > ");
+		printf("Enter account number between 0-3 (recommended: 0) > ");
 		if (!fgets(cmd, sizeof(cmd), stdin)) {
 			fprintf(stderr, "fgets failure\n");
 			return 1;
@@ -533,12 +539,29 @@ int32 receive_handle(User *user) {
 			j++;
 		}
 		if (strcmp(cmd, "exit") == 0) exit_handle(user);
-		if (atoi(cmd) > 5) {
-			fprintf(stderr, "Maximum account index for this program is 5. Enter a number from 0 to 5.\n");
+		if (atoi(cmd) > 3) {
+			fprintf(stderr, "Maximum account index for this program is 3. Enter a number from 0 to 3.\n");
 		} else {
 			account_index = (uint32_t)atoi(cmd);
 			break;
 		}
+	}
+	if (account_index > 0) {
+		printf("Please wait while we query the blockchain to ensure previous accounts have already been used...\n");
+		// Ensure all accounts preceding it have been used
+		for (uint32_t index = 0; index < account_index; index++) {
+			result = scan_one_accounts_external_chain(user->master_key, index, &user->last_api_request);
+			if (result < 0) {
+				fprintf(stderr, "Error scanning previous accounts\n");
+				continue;
+			} else if (result == 0) {
+				printf("Since account %d is empty, we will use account %d to receive funds.\n", (int)index, (int)index);
+				account_index = index;
+				break;
+			} else {
+				continue;
+			}
+		}	
 	}
 	account_t *account = add_account_to_user(user, account_index);
 	if (!account) {
@@ -552,7 +575,7 @@ int32 receive_handle(User *user) {
 		fprintf(stderr, "Error gcry_malloc_secure\n");
 		return 1;
 	}
-	int result = derive_from_public_to_account(user->master_key, account_index, account_key); // m/44'/0'/account'
+	result = derive_from_public_to_account(user->master_key, account_index, account_key); // m/44'/0'/account'
 	if (result != 0) {
 		fprintf(stderr, "Failed to derive account key\n");
 		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
@@ -740,7 +763,7 @@ int32 send_handle(User *user) {
 	utxo_t *selected = NULL;
 	int num_selected = 0;
 	long long input_sum = 0;
-	result = select_coins(utxos, num_utxos, amount, fee, &selected, &num_selected, &input_sum);
+	int result = select_coins(utxos, num_utxos, amount, fee, &selected, &num_selected, &input_sum);
 	if (result != 0) {
 		printf("Coin selection failed\n");
 		for (int i = 0; i < num_utxos; i++) gcry_free(utxos[i].key);
@@ -769,7 +792,7 @@ int32 send_handle(User *user) {
 			gcry_free(utxos);
 			return 1;
 		}
-		result = derive_from_account_to_change(change_back_key, 1, change_key);
+		result = derive_from_account_to_change(change_back_key, 1, change_back_key);
 		if (result != 0) {
 			fprintf(stderr, "Child key derivation failed\n");
 			for (int i = 0; i < num_utxos; i++) gcry_free(utxos[i].key);
@@ -790,7 +813,7 @@ int32 send_handle(User *user) {
 		user->accounts[account_index]->used_indexes_count++;
 	}	
 	char *raw_tx_hex = NULL;
-	result = build_transaction(recipient, amount, selected, num_selected, change_back_key, fee, &raw_tx_hex);
+	result = build_transaction(recipient2, amount, selected, num_selected, change_back_key, fee, &raw_tx_hex);
 //	sign_transaction();
 //	broadcast_transaction();	
 		
