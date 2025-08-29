@@ -469,7 +469,7 @@ int32 balance_handle(User *user) {
 		printf("Please enter the account number you'd like to see the balance of (between 0 - 100)\n"
 			"Keep in mind that on this app, you are limited to only receiving funds on account 0-3,\n"
 			"If you use a higher account on a different wallet software, we can scan it here, (up to 20 indexes).\n"
-			"> ");
+			"Enter account number to check balance on: > ");
 		zero((void *)cmd, 256);
 		if (!fgets(cmd, 256, stdin)) {
 			fprintf(stderr, "Failure reading account number\n");
@@ -527,7 +527,7 @@ int32 receive_handle(User *user) {
 		"that account 0 should be used instead.\n");
 	while (1) {
 		zero((void*)cmd, sizeof(cmd));
-		printf("Enter account number between 0-3 (recommended: 0) > ");
+		printf("Enter account number between 0-3: (recommended - 0) > ");
 		if (!fgets(cmd, sizeof(cmd), stdin)) {
 			fprintf(stderr, "fgets failure\n");
 			return 1;
@@ -641,8 +641,11 @@ int32 send_handle(User *user) {
 		"This does not necessarily mean that the funds aren't in your wallet associated with your seed phrase, however.\n");
 	char cmd[256];
 	uint32_t account_index;
+	int result;
 	while(1) {
-		printf("Please enter the account number you'd like to see the balance of (between 0 - 100)\n> ");
+		printf("Please enter the account number you'd like to send from (between 0 - 100)\n"
+			"We will query the blockchain to make sure you have enough UTXOs balance in this account to send funds.\n"
+			"Enter account number: > ");
 		zero((void *)cmd, 256);
 		if (!fgets(cmd, 256, stdin)) {
 			fprintf(stderr, "Failure reading account number\n");
@@ -662,7 +665,7 @@ int32 send_handle(User *user) {
 			break;
 		}
 	}
-	printf("Please wait while we query the blockchain for your UTXOs' balance...(account %u)\n", account_index);
+	printf("Please wait while we query the blockchain to check your UTXOs balance...\n(Account: %d, first 20 address indexes)\n", (int)account_index);
 	utxo_t *utxos = NULL;
 	int num_utxos = 0;
 	long long total_balance = get_utxos(user->master_key, &utxos, &num_utxos, account_index, &user->last_api_request);
@@ -679,6 +682,7 @@ int32 send_handle(User *user) {
 		printf("No sats to send.\n");
 		return 0;
 	}
+
 	char recipient1[ADDRESS_MAX_LEN];
 	char recipient2[ADDRESS_MAX_LEN];
 	long long amount;
@@ -763,7 +767,7 @@ int32 send_handle(User *user) {
 	utxo_t *selected = NULL;
 	int num_selected = 0;
 	long long input_sum = 0;
-	int result = select_coins(utxos, num_utxos, amount, fee, &selected, &num_selected, &input_sum);
+	result = select_coins(utxos, num_utxos, amount, fee, &selected, &num_selected, &input_sum);
 	if (result != 0) {
 		printf("Coin selection failed\n");
 		for (int i = 0; i < num_utxos; i++) gcry_free(utxos[i].key);

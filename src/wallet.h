@@ -7,7 +7,7 @@
 #define SATS_PER_BTC 100000000.0
 #define N_VALUE_HEX "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141"
 #define HARD_FLAG 0x80000000
-#define SECS_PER_REQUEST 30
+#define SECS_PER_REQUEST 20
 
 #define ACCOUNTS_CAPACITY 3
 #define INITIAL_USED_INDEXES_CAPACITY 20
@@ -50,6 +50,7 @@ void resize_convert_hex_to_bytes(const char *, uint8_t *);
 void print_bytes_as_hex(const char *, const uint8_t *, size_t);
 void print_seed_hashed(const uint8_t *, size_t);
 void print_master_priv_key_hashed(const uint8_t *, size_t);
+int pubkeyhash_to_address(const uint8_t *, size_t, char *, size_t);
 int pubkey_to_address(const uint8_t *, size_t, char *, size_t);
 int generate_master_key(const uint8_t *seed, size_t, key_pair_t *);
 int derive_child_key(const key_pair_t *, uint32_t, key_pair_t *);

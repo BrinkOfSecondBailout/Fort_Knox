@@ -138,6 +138,83 @@ static uint32_t bech32_polymod(const uint8_t *values, size_t len) {
     }
     return chk;
 }
+
+int pubkeyhash_to_address(const uint8_t *pub_key_hash, size_t pub_key_hash_len, char *address, size_t address_len) {
+	uint8_t program_values[BECH32_VALUES_MAX];
+	size_t program_values_len;
+	convert_bits(program_values, &program_values_len, pub_key_hash, 20, 8, 5, 1);
+	if (program_values_len != 32) { // Expected for 20 bytes (160 bits / 5 = 32, no pad)
+		fprintf(stderr, "Unexpected program length: %zu\n", program_values_len);
+		return 1;
+	}
+	// Finish creating ScriptPubKey
+	// Data values = version (5-bit) + program_values
+	uint8_t data_values[BECH32_VALUES_MAX];
+	data_values[0] = 0;
+	memcpy(data_values + 1, program_values, program_values_len);
+	size_t data_values_len = 1 + program_values_len;
+
+
+	// Add HRP and compute checksum
+	const char *hrp = "bc"; // Mainnet, use 'tb' for testnet
+	size_t hrp_len = strlen(hrp);
+	size_t check_values_len = data_values_len + hrp_len * 2 + 7; // 1 for separator, 6 for '0' padding
+	uint8_t *check_values = gcry_malloc_secure(check_values_len);
+	if (!check_values) return 1;
+	
+	size_t check_len = 0;
+	// Append all high bits (top 3 bits) for each character of HRP
+	for (size_t i = 0; i < hrp_len; i++) {
+		if (check_len >= check_values_len) {
+			gcry_free(check_values);
+			return 1;
+		}
+		check_values[check_len++] = hrp[i] >> 5;
+	}
+	// Append separator
+	if (check_len >= check_values_len) {
+		gcry_free(check_values);
+		return 1;
+	}
+	check_values[check_len++] = 0;
+	// Append all low bits (bottom 5 bits) for each character of HRP
+	for (size_t i = 0; i < hrp_len; i++) {
+		if (check_len >= check_values_len) {
+			gcry_free(check_values);
+			return 1;
+		}
+		check_values[check_len++] = hrp[i] & 31;
+	}
+
+    	memcpy(check_values + check_len, data_values, data_values_len);
+    	check_len += data_values_len;
+
+	// Append six zeros for padding
+	memset(check_values + check_len, 0, 6);
+	check_len += 6;
+
+    	// Compute checksum
+    	uint32_t polymod = (bech32_polymod(check_values, check_len)) ^ 1;
+    	gcry_free(check_values);
+
+    	// Append checksum to data_values
+    	for (int i = 0; i < 6; i++) {
+        	if (data_values_len >= BECH32_VALUES_MAX) return 1;
+        	data_values[data_values_len++] = (polymod >> (5 * (5 - i))) & 31;
+    	}
+    	// Encode output
+    	size_t pos = 0;
+    	memcpy(address, hrp, hrp_len);
+    	pos += hrp_len;
+    	address[pos++] = '1';
+    	for (size_t i = 0; i < data_values_len; i++) {
+        	if (pos >= address_len - 1) return 1;
+        	address[pos++] = bech32_charset[data_values[i]];
+    	}
+    	address[pos] = '\0';
+    	return 0;
+}
+
 // Convert compressed pub to P2WPKH (Segwit) address
 int pubkey_to_address(const uint8_t *pub_key, size_t pub_key_len, char *address, size_t address_len) {
 	if (pub_key_len != PUBKEY_LENGTH || !address) return -1;
@@ -581,7 +658,7 @@ double get_bitcoin_price(time_t *last_request) {
 	time_t now = time(NULL);
 	if (*last_request != 0 && difftime(now, *last_request) < SECS_PER_REQUEST) {
 		int sleep_time = SECS_PER_REQUEST - (int)difftime(now, *last_request);
-		printf("Rate limit: 1 request per 30 seconds...\nWaiting %d seconds...\n", sleep_time);
+		printf("Rate limit: 1 request per 20 seconds...\nWaiting %d seconds...\n", sleep_time);
 		sleep(sleep_time);
 	}
 	CURLcode res = curl_easy_perform(curl);
@@ -688,7 +765,7 @@ int init_curl_and_addresses(const char **addresses, int num_addresses, curl_buff
 	time_t now = time(NULL);
 	if (*last_request != 0 && difftime(now, *last_request) < SECS_PER_REQUEST) {
 		int sleep_time = SECS_PER_REQUEST - (int)difftime(now, *last_request);
-		printf("Rate limit: 1 request per 30 seconds...\nWaiting %d seconds...\n", sleep_time);
+		printf("Rate limit: 1 request per 20 seconds...\nWaiting %d seconds...\n", sleep_time);
 		sleep(sleep_time);
 	}
 	// Perform blocking network transfer

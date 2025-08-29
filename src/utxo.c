@@ -22,9 +22,9 @@ int get_fee_rate(long long *regular_rate, long long *priority_rate, time_t *last
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buffer);
 	
 	time_t now = time(NULL);
-	if (*last_request != 0 && difftime(now, *last_request) < 30) {
+	if (*last_request != 0 && difftime(now, *last_request) < SECS_PER_REQUEST) {
 		int sleep_time = 30 - (int)difftime(now, *last_request);
-		printf("Rate limit: 1 request per 30 seconds...\nWaiting %d seconds...\n", sleep_time);
+		printf("Rate limit: 1 request per 20 seconds...\nWaiting %d seconds...\n", sleep_time);
 		sleep(sleep_time);
 	}
 	CURLcode res = curl_easy_perform(curl);
@@ -62,6 +62,7 @@ int get_fee_rate(long long *regular_rate, long long *priority_rate, time_t *last
 
 long long query_utxos_balance(char **addresses, int num_addresses, utxo_t **utxos, int *num_utxos, key_pair_t **child_keys, time_t *last_request) {
 	long long total_balance = 0;
+	int result;
 	if (*addresses[0] == '\0' || num_addresses == 0) {
 		fprintf(stderr, "Addresses invalid.\n");
 		for (int k = 0; k < num_addresses; k++) gcry_free((void *)addresses[k]);
@@ -90,7 +91,7 @@ long long query_utxos_balance(char **addresses, int num_addresses, utxo_t **utxo
 	time_t now = time(NULL);
 	if (*last_request != 0 && difftime(now, *last_request) < SECS_PER_REQUEST) {
 		int sleep_time = SECS_PER_REQUEST - (int)difftime(now, *last_request);
-		printf("Rate limit: 1 request per 30 seconds...\nWaiting %d seconds...\n", sleep_time);
+		printf("Rate limit: 1 request per 20 seconds...\nWaiting %d seconds...\n", sleep_time);
 		sleep(sleep_time);
 	}
     	CURLcode res = curl_easy_perform(curl);
@@ -134,11 +135,10 @@ long long query_utxos_balance(char **addresses, int num_addresses, utxo_t **utxo
 	}
 	for (int i = 0; i < *num_utxos; i++) {
 		json_t *output = json_array_get(unspent_outputs, i);
-		json_t *tx_hash = json_object_get(output, "tx_hash_big_endian");
+		json_t *tx_hash = json_object_get(output, "tx_hash");
 		json_t *tx_output_n = json_object_get(output, "tx_output_n");
 		json_t *value = json_object_get(output, "value");
-		json_t *script = json_object_get(output, "script");
-		if (!json_is_string(tx_hash) || !json_is_integer(tx_output_n) || !json_is_integer(value) || !json_is_integer(script)) {
+		if (!json_is_string(tx_hash) || !json_is_integer(tx_output_n) || !json_is_integer(value)) {
 			fprintf(stderr, "Invalid UTXO data\n");
 			for (int k = 0; k < num_addresses; k++) gcry_free((void *)addresses[k]);
     			gcry_free((void *)addresses);
@@ -150,21 +150,38 @@ long long query_utxos_balance(char **addresses, int num_addresses, utxo_t **utxo
 		}
 		// Copy values over to utxo struct
 		strncpy((*utxos)[i].txid, json_string_value(tx_hash), 64);
-		(*utxos)[i].vout = json_integer_value(tx_output_n);
-		(*utxos)[i].amount = json_integer_value(value);
+		(*utxos)[i].vout = (uint32_t)json_integer_value(tx_output_n);
+		(*utxos)[i].amount = (long long)json_integer_value(value);
 		total_balance += (*utxos)[i].amount;
 		// Convert script to Bech32 address
+		json_t *script = json_object_get(output, "script");
+		if (!json_string_value(script)) {
+			fprintf(stderr, "Invalid UTXO data\n");
+			for (int k = 0; k < num_addresses; k++) gcry_free((void *)addresses[k]);
+    			gcry_free((void *)addresses);
+			gcry_free((void *)*utxos);
+			*utxos = NULL;
+			*num_utxos = 0;
+			json_decref(root);
+			return -1;
+		}
 		const char *script_hex = json_string_value(script);
 		char utxo_address[ADDRESS_MAX_LEN];
 		if (strlen(script_hex) >= 4) {
 			// Extract 20-byte pubkeyhash from script (skip 0014)
 			uint8_t hash[20];
 			hex_to_bytes(script_hex + 4, hash, 20);
-			uint8_t witness_program[22];
-			witness_program[0] = 0x00;
-			witness_program[1] = 0x14;
-			memcpy(witness_program + 2, hash, 20);
-			pubkey_to_address(witness_program, 22, utxo_address, ADDRESS_MAX_LEN);
+			result = pubkeyhash_to_address(hash, 22, utxo_address, ADDRESS_MAX_LEN);
+			if (result != 0) {
+				fprintf(stderr, "Failure converting witness program to address\n");
+				for (int k = 0; k < num_addresses; k++) gcry_free((void *)addresses[k]);
+				gcry_free((void *)addresses);
+				gcry_free((void *)*utxos);
+				*utxos = NULL;
+				*num_utxos = 0;
+				json_decref(root);
+				return -1;
+			}
 		} else {
 			fprintf(stderr, "Invalid script for UTXO\n");
 			for (int k = 0; k < num_addresses; k++) gcry_free((void *)addresses[k]);
@@ -177,7 +194,7 @@ long long query_utxos_balance(char **addresses, int num_addresses, utxo_t **utxo
 		}
 		(*utxos)[i].key = NULL;
 		for (int j = 0; j < num_addresses; j++) {
-			if (strcmp(utxo_address, addresses[j]) == 0) {
+			if (strncmp(utxo_address, addresses[j], ADDRESS_MAX_LEN) == 0) {
 				(*utxos)[i].key = child_keys[j];
 				child_keys[j] = NULL; // Preventing double-free
 				strncpy((*utxos)[i].address, utxo_address, ADDRESS_MAX_LEN);
@@ -607,9 +624,9 @@ int broadcast_transaction(const char *raw_tx_hex, time_t *last_request) {
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buffer);
 	
 	time_t now = time(NULL);
-	if (*last_request != 0 && difftime(now, *last_request) < 30) {
+	if (*last_request != 0 && difftime(now, *last_request) < SECS_PER_REQUEST) {
 		int sleep_time = 30 - (int)difftime(now, *last_request);
-		printf("Rate limit: 1 request per 30 seconds...\nWaiting %d seconds...\n", sleep_time);
+		printf("Rate limit: 1 request per 20 seconds...\nWaiting %d seconds...\n", sleep_time);
 		sleep(sleep_time);
 	}
 	CURLcode res = curl_easy_perform(curl);
