@@ -683,43 +683,30 @@ int32 send_handle(User *user) {
 		return 0;
 	}
 
-	char recipient1[ADDRESS_MAX_LEN];
-	char recipient2[ADDRESS_MAX_LEN];
+	char recipient[ADDRESS_MAX_LEN];
 	long long amount;
-	while (1) {
-		printf("Enter recipient address, be sure to verify thoroughly.\n> ");
-		zero((void *)recipient1, ADDRESS_MAX_LEN);
-		zero((void *)recipient2, ADDRESS_MAX_LEN);
-		if (!fgets(recipient1, ADDRESS_MAX_LEN, stdin)) {
-			fprintf(stderr, "Error reading command\n");
-			continue;
-		}
-		printf("Enter recipient address again, make sure it matches your first input.\n> ");	
-		if (!fgets(recipient2, ADDRESS_MAX_LEN, stdin)) {
-			fprintf(stderr, "Error reading command\n");
-			continue;
-		}
-		if (strncmp(recipient1, recipient2, ADDRESS_MAX_LEN) != 0) {
-			fprintf(stderr, "Inputs not matching. Try again\n");
-			continue;
-		} else {
-			printf("Got it!\n");
-			break;
-		}
+	printf("Enter recipient address, be sure to verify thoroughly.\n> ");
+	zero((void *)recipient, ADDRESS_MAX_LEN);
+	if (!fgets(recipient, ADDRESS_MAX_LEN, stdin)) {
+		fprintf(stderr, "Error reading command\n");
+		return 1;
 	}
+	printf("Got it!\nYou entered: %s", recipient);
+	recipient[strlen(recipient) - 1] = '\0';
 	while (1) {
 		zero((void *)cmd, 256);
-		printf("Enter amount you wish to send in satoshis:\n> ");
+		printf("Enter amount you wish to send in satoshis (Your balance: %lld):\n"
+		"> ", total_balance);
 		if (!fgets(cmd, 256, stdin)) {
 			fprintf(stderr, "Error reading command\n");
 			continue;
 		}
 		amount = (long long)atoi(cmd);
-		if (amount < (long long) 0 || amount < total_balance) {
+		if (amount <= (long long) 0 || amount > total_balance) {
 			fprintf(stderr, "Invalid amount, must be more than 0 and less than your total balance.\n");
 			continue;
 		} else {
-			printf("Got it!\n");
+			printf("Got it! Sending %lld...\n", amount);
 			break;
 		}
 	}
@@ -749,24 +736,26 @@ int32 send_handle(User *user) {
 		"You can choose a number lower than the regular rate, but that may leave your transaction in limbo for"
 		" a long, indefinite, undefined amount of time\n");
 	while (1) {
-		printf("Enter how much you'd like to pay for miner fees (in satoshis): \n> ");
+		printf("Enter how much you'd like to pay for miner fees (in satoshis, use the 'total fees' estimation above as benchmark): \n> ");
 		zero((void *)cmd, 256);
 		if (!fgets(cmd, 256, stdin)) {
 			fprintf(stderr, "Error reading command\n");
 			continue;
 		}
 		fee = (long long)atoi(cmd);
-		if (fee < (long long) 0 || fee + amount < total_balance) {
+		if (fee <= (long long) 0 || fee + amount > total_balance) {
 			fprintf(stderr, "Invalid fee chosen, must be above 0 and less than total balance when added with amount to be sent.\n");
 			continue;
 		} else {
-			printf("Got it!\n");	
+			printf("Got it! We will pay %llu sats to the miners\n", fee);	
 			break;
 		}
 	}
 	utxo_t *selected = NULL;
 	int num_selected = 0;
 	long long input_sum = 0;
+	printf("The program will now select the best UTXOs for this transaction, using a 'greedy' method,\n"
+		"meaning that we will try to use the smallest number of UTXOs set possible, to save on fees.\n");
 	result = select_coins(utxos, num_utxos, amount, fee, &selected, &num_selected, &input_sum);
 	if (result != 0) {
 		printf("Coin selection failed\n");
@@ -775,9 +764,19 @@ int32 send_handle(User *user) {
 		gcry_free(utxos);
 		return 1;
 	}
+	printf("Selected %d UTXOs, total: %lld satoshis\n", num_selected, input_sum);
+	for (int i = 0; i < num_selected; i++) {
+		printf("UTXO index=%d: txid=%s, vout=%u, amount=%lld\n", 
+			i, selected[i].txid, selected[i].vout, selected[i].amount);
+	}
 	long long change = input_sum - amount - fee;
 	key_pair_t *change_back_key = NULL;
 	change_back_key = gcry_malloc_secure(sizeof(key_pair_t));
+	account_t *account = add_account_to_user(user, account_index);
+	if (!account) {
+		fprintf(stderr, "Failure adding account\n");
+		return 1;
+	}
 	if (!change_back_key) {
 		fprintf(stderr, "Change back key allocation failed\n");
 		for (int i = 0; i < num_utxos; i++) gcry_free(utxos[i].key);
@@ -786,19 +785,19 @@ int32 send_handle(User *user) {
 		return 1;
 	}
 	if (change > 0) {
-		uint32_t change_index = user->accounts[account_index]->used_indexes_count;
+		uint32_t change_index = account->used_indexes_count;
 		result = derive_from_public_to_account(user->master_key, account_index, change_back_key); 
 		if (result != 0) {
-			fprintf(stderr, "Child key derivation failed\n");
+			fprintf(stderr, "Account key derivation failed\n");
 			for (int i = 0; i < num_utxos; i++) gcry_free(utxos[i].key);
 			if (num_selected > 0) gcry_free(selected);
 			gcry_free(change_back_key);
 			gcry_free(utxos);
 			return 1;
 		}
-		result = derive_from_account_to_change(change_back_key, 1, change_back_key);
+		result = derive_from_account_to_change(change_back_key, (uint32_t)1, change_back_key);
 		if (result != 0) {
-			fprintf(stderr, "Child key derivation failed\n");
+			fprintf(stderr, "Change key derivation failed\n");
 			for (int i = 0; i < num_utxos; i++) gcry_free(utxos[i].key);
 			if (num_selected > 0) gcry_free(selected);
 			gcry_free(change_back_key);
@@ -814,10 +813,10 @@ int32 send_handle(User *user) {
 			gcry_free(utxos);
 			return 1;
 		}
-		user->accounts[account_index]->used_indexes_count++;
+		account->used_indexes_count++;
 	}	
 	char *raw_tx_hex = NULL;
-	result = build_transaction(recipient2, amount, selected, num_selected, change_back_key, fee, &raw_tx_hex);
+	result = build_transaction(recipient, amount, &selected, num_selected, change_back_key, fee, raw_tx_hex);
 //	sign_transaction();
 //	broadcast_transaction();	
 		

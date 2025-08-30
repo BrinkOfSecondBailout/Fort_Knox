@@ -15,7 +15,7 @@ int estimated_transaction_size(int num_inputs, int num_outputs) {
 int get_fee_rate(long long *regular_rate, long long *priority_rate, time_t *last_request) {
 	CURL *curl = curl_easy_init();
 	if (!curl) return -1;
-	char url[] = "https//api.blockchain.info/mempool/fees";
+	char url[] = "https://mempool.space/api/v1/fees/recommended";
 	curl_buffer_t buffer = {0};
 	curl_easy_setopt(curl, CURLOPT_URL, url);
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_callback_func);
@@ -23,7 +23,7 @@ int get_fee_rate(long long *regular_rate, long long *priority_rate, time_t *last
 	
 	time_t now = time(NULL);
 	if (*last_request != 0 && difftime(now, *last_request) < SECS_PER_REQUEST) {
-		int sleep_time = 30 - (int)difftime(now, *last_request);
+		int sleep_time = SECS_PER_REQUEST - (int)difftime(now, *last_request);
 		printf("Rate limit: 1 request per 20 seconds...\nWaiting %d seconds...\n", sleep_time);
 		sleep(sleep_time);
 	}
@@ -32,7 +32,7 @@ int get_fee_rate(long long *regular_rate, long long *priority_rate, time_t *last
 	curl_easy_cleanup(curl);
 	if (res != CURLE_OK) {
 		free(buffer.data);
-		fprintf(stderr, "CURL failed\n");
+		fprintf(stderr, "CURL failed: %s\n", curl_easy_strerror(res));
 		return -1;
 	}
 	json_error_t error;
@@ -42,13 +42,13 @@ int get_fee_rate(long long *regular_rate, long long *priority_rate, time_t *last
 		fprintf(stderr, "JSON parse error: %s\n", error.text);
 		return -1;
 	}
-	json_t *priority = json_object_get(root, "priority");
+	json_t *priority = json_object_get(root, "fastestFee");
 	if (!json_is_integer(priority)) {
 		fprintf(stderr, "Unable to find priority fee rate in JSON\n");
 		json_decref(root);
 		return -1;
 	}
-	json_t *regular = json_object_get(root, "regular");
+	json_t *regular = json_object_get(root, "hourFee");
 	if (!json_is_integer(regular)) {
 		fprintf(stderr, "Unable to find regular fee rate in JSON\n");
 		json_decref(root);
@@ -60,7 +60,7 @@ int get_fee_rate(long long *regular_rate, long long *priority_rate, time_t *last
 	return 0;
 }
 
-long long query_utxos_balance(char **addresses, int num_addresses, utxo_t **utxos, int *num_utxos, key_pair_t **child_keys, time_t *last_request) {
+long long query_utxos(char **addresses, int num_addresses, utxo_t **utxos, int *num_utxos, key_pair_t **child_keys, time_t *last_request) {
 	long long total_balance = 0;
 	int result;
 	if (*addresses[0] == '\0' || num_addresses == 0) {
@@ -207,9 +207,6 @@ long long query_utxos_balance(char **addresses, int num_addresses, utxo_t **utxo
 	}
 	for (int k = 0; k < num_addresses; k++) gcry_free((void *)addresses[k]);
     	gcry_free((void *)addresses);
-	gcry_free((void *)*utxos);
-	*utxos = NULL;
-	*num_utxos = 0;
 	json_decref(root);
 	return total_balance;
 }
@@ -319,13 +316,7 @@ long long get_utxos(key_pair_t *master_key, utxo_t **utxos, int *num_utxos, uint
 		zero_and_gcry_free((void *)change_key, sizeof(key_pair_t));
 	}
 	zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
-/*
-printf("All addresses-\n");
-for (int i = 0; i < addr_count; i++) {
-	printf("%d: %s\n", i + 1, addresses[i]);
-}
-*/
-    	return query_utxos_balance(addresses, addr_count, utxos, num_utxos, child_keys, last_request);	
+    	return query_utxos(addresses, addr_count, utxos, num_utxos, child_keys, last_request);	
 }
 
 static int compare_utxos(const void *a, const void *b) {
@@ -338,7 +329,7 @@ static int compare_utxos(const void *a, const void *b) {
 
 int select_coins(utxo_t *utxos, int num_utxos, long long amount, long long fee, utxo_t **selected, int *num_selected, long long *input_sum) {
 	// Greedy
-	if (!utxos || num_utxos <= 0 || !selected || !num_selected || !input_sum || amount <= 0 || fee < 0) {
+	if (!utxos || num_utxos <= 0 || !selected || !num_selected || !input_sum || amount <= 0 || fee <= 0) {
 		fprintf(stderr, "Invalid input\n");
 		return 1;
 	}
@@ -377,12 +368,6 @@ int select_coins(utxo_t *utxos, int num_utxos, long long amount, long long fee, 
 	}
 	memcpy(*selected, sorted_utxos, count * sizeof(utxo_t));
 	*num_selected = count;
-
-	printf("Selected %d UTXOS, total: %lld satoshis\n", *num_selected, *input_sum);
-	for (int i = 0; i < *num_selected; i++) {
-		printf("UTXO %d: txid=%s, vout=%u, amount=%lld\n", 
-			i, (*selected)[i].txid, (*selected)[i].vout, (*selected)[i].amount);
-	}
 	return 0;
 }
 // Variable length integers
@@ -418,20 +403,22 @@ static const char *bech32_charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
 
 static int bech32_decode_char(char c) {
 	const char *p = strchr(bech32_charset, tolower(c));
-	if (p) return p - bech32_charset;
+	if (p) {
+		printf("%c -> %ld\n", c, p - bech32_charset);
+		return p - bech32_charset;
+	}
 	return -1;
 }
 
 int bech32_decode(const char *address, uint8_t *program, size_t *program_len) {
+printf("Address: %s\n", address);
 	if (strncmp(address, "bc1q", 4) != 0) return -1;
 	size_t len = strlen(address);
 	if (len < 8 || len > 90) return -1;
-	
 	const char *hrp = "bc";
 	size_t hrp_len = strlen(hrp);
 	const char *separator = strchr(address, '1');
 	if (separator == NULL || separator - address != hrp_len) return -1; // Verify separator is in correct position
-
 	// Decode data part
 	uint8_t values[len - hrp_len - 1];
 	size_t values_len = 0;
@@ -440,18 +427,19 @@ int bech32_decode(const char *address, uint8_t *program, size_t *program_len) {
 		if (v < 0) return -1;
 		values[values_len++] = v;
 	}
+printf("Values len: %zu\n", values_len);
 	// Verify checksum
 	if (values_len < 6) return -1; // Checksum is 6 chars
 	// Convert to 8 bit bytes
 	uint8_t data[values_len * 5 / 8];
 	size_t data_len;
-	convert_bits(data, &data_len, values, values_len - 6, 5, 8, 0); // Exclude checksum
+	convert_bits(data, &data_len, values + 1, values_len - 6 - 1, 5, 8, 0); // Exclude first byte and exclude checksum
+print_bits("Data after 5-8 bits conversion", data, data_len);
 	if (data_len < 2 || data_len > 40) return -1;
-
 	// Program: version + data
-	program[0] = data[0];
-	memcpy(program + 1, data + 1, data_len - 1);
-	*program_len = data_len;
+	program[0] = 0;
+	memcpy(program + 1, data, data_len);
+	*program_len = data_len + 1;
 	return 0;
 }
 
@@ -462,6 +450,8 @@ int address_to_scriptpubkey(const char *address, uint8_t *script, size_t *script
 		fprintf(stderr, "Failed to decode Bech32 address\n");
 		return -1;
 	}
+print_bytes_as_hex("Program", program, program_len);
+printf("Program Len: %zu\n", program_len);
 	if (program[0] != 0 || program_len != 21) {
 		fprintf(stderr, "Only P2WPKH (version 0, 20-byte hash) supported\n");
 		return -1;
@@ -474,29 +464,30 @@ int address_to_scriptpubkey(const char *address, uint8_t *script, size_t *script
 	return 0;
 }
 
-int build_transaction(const char *recipient, long long amount, utxo_t *selected, int num_selected, key_pair_t *change_back_key, long long fee, char **raw_tx_hex) {
-	if (!recipient || amount <= 0 || !selected || num_selected <= 0 || fee < 0 || !raw_tx_hex) {
+int build_transaction(const char *recipient, long long amount, utxo_t **selected, int num_selected, key_pair_t *change_back_key, long long fee, char *raw_tx_hex) {
+	if (!recipient || amount <= 0 || !selected || num_selected <= 0 || fee < 0) {
 		fprintf(stderr, "Invalid inputs\n");
 		return 1;
 	}
 	// Validate funds
 	long long input_sum = 0;
 	for (int i = 0; i < num_selected; i++) {
-		if (selected[i].amount < 0) {
+		if ((*selected)[i].amount < 0) {
 			fprintf(stderr, "Invalid UTXO amount at index %d\n", i);
 			return 1;
 		}
-		input_sum += selected[i].amount;
+		input_sum += (*selected)[i].amount;
 	}	
 	if (input_sum < amount + fee) {
-		fprintf(stderr, "Insufficient funds: %lld < %lld\n", input_sum, amount + fee);
+		fprintf(stderr, "Insufficient funds, %lld < %lld\n", input_sum, amount + fee);
 		return 1;
 	}
 	long long change = input_sum - amount - fee;
 	int num_outputs = change > 0 ? 2 : 1;
 	// Estimate buffer size
 	size_t max_size = 4 + 2 + 9 + num_selected * 40 + 9 + num_outputs * 25 + num_selected * 4 + 4 + 1000; // Extra for safety
-	uint8_t *buffer = malloc(max_size);
+printf("Max size for buffer: %zu\n", max_size);
+	uint8_t *buffer = (uint8_t *)malloc(max_size);
 	if (!buffer) {
 		fprintf(stderr, "Failed to allocate tx buffer\n");
 		return 1;
@@ -508,6 +499,7 @@ int build_transaction(const char *recipient, long long amount, utxo_t *selected,
 	// Marker and flag
 	buffer[pos++] = 0x00;
 	buffer[pos++] = 0x01;
+print_bytes_as_hex("After marker and flag", buffer, sizeof(buffer));
 	// Input count
 	uint8_t varint_buf[9];
 	size_t varint_len;
@@ -518,17 +510,18 @@ int build_transaction(const char *recipient, long long amount, utxo_t *selected,
 	}	
 	memcpy(buffer + pos, varint_buf, varint_len);
 	pos += varint_len;
+print_bytes_as_hex("After Input Count", buffer, sizeof(buffer));
 	// Inputs
 	for (int i = 0; i < num_selected; i++) {
 		// TxId (reversed)
 		uint8_t txid_bytes[32];
-		hex_to_bytes(selected[i].txid, txid_bytes, 32);
+		hex_to_bytes((*selected)[i].txid, txid_bytes, 32);
 		for (int j = 0; j < 32; j++) {
 			buffer[pos + j] = txid_bytes[31 - j];
 		}
 		pos += 32;
 		// vout
-		encode_uint32_le(selected[i].vout, buffer + pos);
+		encode_uint32_le((*selected)[i].vout, buffer + pos);
 		pos += 4;
 		// ScriptSig (empty for P2WPKWH)
 		buffer[pos++] = 0x00;
@@ -536,6 +529,7 @@ int build_transaction(const char *recipient, long long amount, utxo_t *selected,
 		encode_uint32_le(0xffffffff, buffer + pos);
 		pos += 4;
 	}
+print_bytes_as_hex("After Inputs", buffer, sizeof(buffer));
 	// Output count
 	if (encode_varint(num_outputs, varint_buf, &varint_len) != 0) {
 		free(buffer);
@@ -544,6 +538,7 @@ int build_transaction(const char *recipient, long long amount, utxo_t *selected,
 	}
 	memcpy(buffer + pos, varint_buf, varint_len);
 	pos += varint_len;
+print_bytes_as_hex("After Output count", buffer, sizeof(buffer));
 	// Outputs
 	// Recipient output
 	uint8_t script[25];
@@ -557,6 +552,7 @@ int build_transaction(const char *recipient, long long amount, utxo_t *selected,
 	pos += 8;
 	memcpy(buffer + pos, script, script_len);
 	pos += script_len;
+print_bytes_as_hex("After Outputs", buffer, sizeof(buffer));
 	// Change output
 	if (change > 0) {
 		if (!change_back_key) {
@@ -581,26 +577,29 @@ int build_transaction(const char *recipient, long long amount, utxo_t *selected,
 		memcpy(buffer + pos, script, script_len);
 		pos += script_len;
 	}
+print_bytes_as_hex("After adding Change output", buffer, sizeof(buffer));
 	// Witness placeholder
 	for (int i = 0; i < num_selected; i++) {
 		buffer[pos++] = 0x02; // 2 witness items(signature + pubkey)
 		buffer[pos++] = 0x00; // Placeholder for signature
 		buffer[pos++] = 0x00; // Placeholder for pubkey
 	}
+print_bytes_as_hex("After Witness Placeholder", buffer, sizeof(buffer));
 	// Locktime
 	encode_uint32_le(0, buffer + pos);
 	pos += 4;
 	// Convert to hex
-	*raw_tx_hex = malloc(pos * 2 + 1);
-	if (!*raw_tx_hex) {
+	raw_tx_hex = (char *)malloc(pos * 2 + 1);
+	if (!raw_tx_hex) {
 		free(buffer);
 		fprintf(stderr, "Failed to allocate raw_tx_hex\n");
 		return 1;
 	}
 	for (size_t i = 0; i < pos; i++) {
-		sprintf(*raw_tx_hex + i * 2, "%02x", buffer[i]);
+		sprintf(raw_tx_hex + i * 2, "%02x", buffer[i]);
 	}
-	(*raw_tx_hex)[pos * 2] = '\0';
+	raw_tx_hex[pos * 2] = '\0';
+printf("Raw Tx Hex: %s\n", raw_tx_hex);
 	free(buffer);
 	return 0;
 }

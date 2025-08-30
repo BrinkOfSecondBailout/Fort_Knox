@@ -113,8 +113,10 @@ void convert_bits(uint8_t *out, size_t *outlen, const uint8_t *in, size_t inlen,
 	int bits = 0;
 	size_t idx = 0;
 	for (size_t i = 0; i < inlen; i++) {
-		val = (val << 8) | in[i];
-		bits += 8;
+		val = (val << inbits) | in[i];
+		bits += inbits;
+	//	val = (val << 8) | in[i];
+	//	bits += 8;
 		while (bits >= outbits) {
 			bits -= outbits;
 			out[idx++] = (val >> bits) & ((1 << outbits) - 1);

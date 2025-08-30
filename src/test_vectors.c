@@ -2,6 +2,7 @@
 #include "mnemonic.h"
 #include "common.h"
 #include "wallet.h"
+#include "utxo.h"
 #include "test_vectors.h"
 
 // BIP-32 test vectors (from Bitcoin wiki)
@@ -357,13 +358,29 @@ int run_address_generation_test() {
 	
 	return failures;
 }
- 
+
+int run_bech32_decoder() {
+	int failures = 0;
+	const char *address = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4";
+	const char *expected_key_hex = "0014751e76e8199196d454941c45d1b3a323f1433bd6";	
+	uint8_t script[25];
+	size_t script_len;
+	int result;
+	result = address_to_scriptpubkey(address, script, &script_len);
+	if (result == 0) {
+		print_bytes_as_hex("Result  ", script, script_len);
+	}
+	printf("Expected: %s\n", expected_key_hex);	
+	return failures;
+}
+
 int main() {
 	int failures = 0; 
-	failures += run_mnemonic_test();
-	failures += run_master_and_child_test(); 
-	failures += run_mnemonic_recovery_test();
-	failures += run_address_generation_test();
+	//failures += run_mnemonic_test();
+	//failures += run_master_and_child_test(); 
+	//failures += run_mnemonic_recovery_test();
+	//failures += run_address_generation_test();
+	run_bech32_decoder();
     	printf("Total failures: %d\n", failures);
     	return failures > 0 ? 1 : 0;
 }

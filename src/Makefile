@@ -6,7 +6,7 @@ OBJECTS = $(SOURCES:.c=.o)
 TARGET = knox
 
 #Test file
-TEST_SOURCES = test_vectors.c crypt.c mnemonic.c wallet.c
+TEST_SOURCES = test_vectors.c crypt.c mnemonic.c wallet.c utxo.c
 TEST_OBJECTS = $(TEST_SOURCES:.c=.o)
 TEST_TARGET = test_vectors
 
