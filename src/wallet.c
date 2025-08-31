@@ -62,6 +62,16 @@ void print_bytes_as_hex(const char *label, const uint8_t *data, size_t len) {
     	printf("\n");
 }
 
+// Helper: Convert bytes to hex string
+int bytes_to_hex(const uint8_t *data, size_t len, char *hex, size_t hex_len) {
+    for (size_t i = 0; i < len; i++) {
+        sprintf(hex + i * 2, "%02x", data[i]);
+    }
+    hex[len * 2] = '\0';
+    return 0;
+}
+
+
 // Print a hash of the seed, for testing purposes
 void print_seed_hashed(const uint8_t *seed, size_t len) {
 	unsigned char hash[32];

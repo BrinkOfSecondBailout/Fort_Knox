@@ -404,21 +404,30 @@ static const char *bech32_charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
 static int bech32_decode_char(char c) {
 	const char *p = strchr(bech32_charset, tolower(c));
 	if (p) {
-		printf("%c -> %ld\n", c, p - bech32_charset);
+		//printf("%c -> %ld\n", c, p - bech32_charset);
 		return p - bech32_charset;
 	}
 	return -1;
 }
 
 int bech32_decode(const char *address, uint8_t *program, size_t *program_len) {
-printf("Address: %s\n", address);
-	if (strncmp(address, "bc1q", 4) != 0) return -1;
+//printf("Address: %s\n", address);
+	if (strncmp(address, "bc1q", 4) != 0) {
+		fprintf(stderr, "Expecting bc1q for P2WKPH v0 addresses only\n");
+		return -1;
+	}
 	size_t len = strlen(address);
-	if (len < 8 || len > 90) return -1;
+	if (len < 8 || len > 90) {
+		fprintf(stderr, "Address must be between 8 and 90 characters\n");
+		return -1;
+	}
 	const char *hrp = "bc";
 	size_t hrp_len = strlen(hrp);
 	const char *separator = strchr(address, '1');
-	if (separator == NULL || separator - address != hrp_len) return -1; // Verify separator is in correct position
+	if (separator == NULL || separator - address != hrp_len) {
+		fprintf(stderr, "No separator\n");
+		return -1; // Verify separator is in correct position
+	}
 	// Decode data part
 	uint8_t values[len - hrp_len - 1];
 	size_t values_len = 0;
@@ -427,14 +436,14 @@ printf("Address: %s\n", address);
 		if (v < 0) return -1;
 		values[values_len++] = v;
 	}
-printf("Values len: %zu\n", values_len);
+//printf("Values len: %zu\n", values_len);
 	// Verify checksum
 	if (values_len < 6) return -1; // Checksum is 6 chars
 	// Convert to 8 bit bytes
 	uint8_t data[values_len * 5 / 8];
 	size_t data_len;
 	convert_bits(data, &data_len, values + 1, values_len - 6 - 1, 5, 8, 0); // Exclude first byte and exclude checksum
-print_bits("Data after 5-8 bits conversion", data, data_len);
+//print_bits("Data after 5-8 bits conversion", data, data_len);
 	if (data_len < 2 || data_len > 40) return -1;
 	// Program: version + data
 	program[0] = 0;
@@ -450,8 +459,8 @@ int address_to_scriptpubkey(const char *address, uint8_t *script, size_t *script
 		fprintf(stderr, "Failed to decode Bech32 address\n");
 		return -1;
 	}
-print_bytes_as_hex("Program", program, program_len);
-printf("Program Len: %zu\n", program_len);
+//print_bytes_as_hex("Program", program, program_len);
+//printf("Program Len: %zu\n", program_len);
 	if (program[0] != 0 || program_len != 21) {
 		fprintf(stderr, "Only P2WPKH (version 0, 20-byte hash) supported\n");
 		return -1;
@@ -461,6 +470,7 @@ printf("Program Len: %zu\n", program_len);
 	script[1] = 0x14;
 	memcpy(script + 2, program + 1, 20);
 	*script_len = 22;
+print_bytes_as_hex("SPK", script, *script_len);
 	return 0;
 }
 
@@ -486,7 +496,6 @@ int build_transaction(const char *recipient, long long amount, utxo_t **selected
 	int num_outputs = change > 0 ? 2 : 1;
 	// Estimate buffer size
 	size_t max_size = 4 + 2 + 9 + num_selected * 40 + 9 + num_outputs * 25 + num_selected * 4 + 4 + 1000; // Extra for safety
-printf("Max size for buffer: %zu\n", max_size);
 	uint8_t *buffer = (uint8_t *)malloc(max_size);
 	if (!buffer) {
 		fprintf(stderr, "Failed to allocate tx buffer\n");
@@ -499,7 +508,6 @@ printf("Max size for buffer: %zu\n", max_size);
 	// Marker and flag
 	buffer[pos++] = 0x00;
 	buffer[pos++] = 0x01;
-print_bytes_as_hex("After marker and flag", buffer, sizeof(buffer));
 	// Input count
 	uint8_t varint_buf[9];
 	size_t varint_len;
@@ -510,7 +518,6 @@ print_bytes_as_hex("After marker and flag", buffer, sizeof(buffer));
 	}	
 	memcpy(buffer + pos, varint_buf, varint_len);
 	pos += varint_len;
-print_bytes_as_hex("After Input Count", buffer, sizeof(buffer));
 	// Inputs
 	for (int i = 0; i < num_selected; i++) {
 		// TxId (reversed)
@@ -520,7 +527,9 @@ print_bytes_as_hex("After Input Count", buffer, sizeof(buffer));
 			buffer[pos + j] = txid_bytes[31 - j];
 		}
 		pos += 32;
+print_bytes_as_hex("Input TxId Reversed", txid_bytes, 32);
 		// vout
+printf("Vout (input): %d\n", (*selected)[i].vout);
 		encode_uint32_le((*selected)[i].vout, buffer + pos);
 		pos += 4;
 		// ScriptSig (empty for P2WPKWH)
@@ -529,7 +538,6 @@ print_bytes_as_hex("After Input Count", buffer, sizeof(buffer));
 		encode_uint32_le(0xffffffff, buffer + pos);
 		pos += 4;
 	}
-print_bytes_as_hex("After Inputs", buffer, sizeof(buffer));
 	// Output count
 	if (encode_varint(num_outputs, varint_buf, &varint_len) != 0) {
 		free(buffer);
@@ -538,28 +546,32 @@ print_bytes_as_hex("After Inputs", buffer, sizeof(buffer));
 	}
 	memcpy(buffer + pos, varint_buf, varint_len);
 	pos += varint_len;
-print_bytes_as_hex("After Output count", buffer, sizeof(buffer));
 	// Outputs
 	// Recipient output
 	uint8_t script[25];
 	size_t script_len;
+printf("Output SPK\n");
 	if (address_to_scriptpubkey(recipient, script, &script_len) != 0) {
 		free(buffer);
 		fprintf(stderr, "Failed to convert recipient address\n");
 		return 1;
 	}
+	// Encode amount to be sent
 	encode_uint64_le(amount, buffer + pos);
 	pos += 8;
+// Encode scriptpubkey size
+encode_uint32_le(script_len, buffer + pos);
+pos++;
+	// Copy over scriptpubkey
 	memcpy(buffer + pos, script, script_len);
 	pos += script_len;
-print_bytes_as_hex("After Outputs", buffer, sizeof(buffer));
 	// Change output
 	if (change > 0) {
+printf("Change: %lld\n", change);
 		if (!change_back_key) {
 			free(buffer);
 			fprintf(stderr, "Change required but no change key provided\n");
 			return 1;
-			
 		}
 		char change_address[ADDRESS_MAX_LEN];
 		if (pubkey_to_address(change_back_key->key_pub_compressed, PUBKEY_LENGTH, change_address, ADDRESS_MAX_LEN) != 0) {
@@ -567,24 +579,28 @@ print_bytes_as_hex("After Outputs", buffer, sizeof(buffer));
 			fprintf(stderr, "Failed to convert change address\n");
 			return 1;
 		}
+printf("Change SPK\n");
 		if (address_to_scriptpubkey(change_address, script, &script_len) != 0) {
 			free(buffer);
 			fprintf(stderr, "Failed to convert change scriptpubkey\n");
 			return 1;
 		}
+		// Encode amount to be sent back as change
 		encode_uint64_le(change, buffer + pos);
 		pos += 8;
+// Encode scriptpubkey size
+encode_uint32_le(script_len, buffer + pos);
+pos++;
+		// Copy over scriptpubkey of your change address
 		memcpy(buffer + pos, script, script_len);
 		pos += script_len;
 	}
-print_bytes_as_hex("After adding Change output", buffer, sizeof(buffer));
 	// Witness placeholder
 	for (int i = 0; i < num_selected; i++) {
-		buffer[pos++] = 0x02; // 2 witness items(signature + pubkey)
+		buffer[pos++] = 0x02; // 2 witness stack items(signature + pubkey)
 		buffer[pos++] = 0x00; // Placeholder for signature
 		buffer[pos++] = 0x00; // Placeholder for pubkey
 	}
-print_bytes_as_hex("After Witness Placeholder", buffer, sizeof(buffer));
 	// Locktime
 	encode_uint32_le(0, buffer + pos);
 	pos += 4;

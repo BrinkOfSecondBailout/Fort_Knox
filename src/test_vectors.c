@@ -359,18 +359,30 @@ int run_address_generation_test() {
 	return failures;
 }
 
-int run_bech32_decoder() {
-	int failures = 0;
-	const char *address = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4";
-	const char *expected_key_hex = "0014751e76e8199196d454941c45d1b3a323f1433bd6";	
+int run_decoder(const char *address, const char *expected_hex) {
 	uint8_t script[25];
 	size_t script_len;
-	int result;
-	result = address_to_scriptpubkey(address, script, &script_len);
-	if (result == 0) {
-		print_bytes_as_hex("Result  ", script, script_len);
+	if (address_to_scriptpubkey(address, script, &script_len) != 0) {
+		fprintf(stderr, "Scriptpubkey conversion failure\n");
+		return 1;
 	}
-	printf("Expected: %s\n", expected_key_hex);	
+	char script_hex[22];
+	bytes_to_hex(script, script_len, script_hex, 22);
+	int pass = ((strlen(script_hex) == strlen(expected_hex)) && (strncmp(script_hex, expected_hex, strlen(expected_hex)) == 0));
+	printf("\nScriptpubkey Convertion Test:\n%s\n", pass ? GREEN"[ PASS ]"RESET : RED"[ FAIL ]"RESET);
+	printf("Expected: %s\n", expected_hex);
+	printf("Result  : %s\n", script_hex);
+	printf("\n");
+	printf("---------------------------------------------\n");
+	printf("\n");
+	return !pass;
+}
+
+int run_bech32_decoder() {
+	int failures = 0;
+	const char *address1 = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4";
+	const char *expected_hex1 = "0014751e76e8199196d454941c45d1b3a323f1433bd6";	
+	failures += run_decoder(address1, expected_hex1);
 	return failures;
 }
 
