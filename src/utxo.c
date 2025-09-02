@@ -404,14 +404,12 @@ static const char *bech32_charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
 static int bech32_decode_char(char c) {
 	const char *p = strchr(bech32_charset, tolower(c));
 	if (p) {
-		//printf("%c -> %ld\n", c, p - bech32_charset);
 		return p - bech32_charset;
 	}
 	return -1;
 }
 
 int bech32_decode(const char *address, uint8_t *program, size_t *program_len) {
-//printf("Address: %s\n", address);
 	if (strncmp(address, "bc1q", 4) != 0) {
 		fprintf(stderr, "Expecting bc1q for P2WKPH v0 addresses only\n");
 		return -1;
@@ -436,14 +434,12 @@ int bech32_decode(const char *address, uint8_t *program, size_t *program_len) {
 		if (v < 0) return -1;
 		values[values_len++] = v;
 	}
-//printf("Values len: %zu\n", values_len);
 	// Verify checksum
 	if (values_len < 6) return -1; // Checksum is 6 chars
 	// Convert to 8 bit bytes
 	uint8_t data[values_len * 5 / 8];
 	size_t data_len;
 	convert_bits(data, &data_len, values + 1, values_len - 6 - 1, 5, 8, 0); // Exclude first byte and exclude checksum
-//print_bits("Data after 5-8 bits conversion", data, data_len);
 	if (data_len < 2 || data_len > 40) return -1;
 	// Program: version + data
 	program[0] = 0;
@@ -503,7 +499,7 @@ int build_transaction(const char *recipient, long long amount, utxo_t **selected
 	}
 	size_t pos = 0;
 	// Version (2 for segwit)
-	encode_uint32_le(2, buffer + pos);
+	encode_uint32_le(TX_VERSION, buffer + pos);
 	pos += 4;
 	// Marker and flag
 	buffer[pos++] = 0x00;
@@ -559,9 +555,9 @@ printf("Output SPK\n");
 	// Encode amount to be sent
 	encode_uint64_le(amount, buffer + pos);
 	pos += 8;
-// Encode scriptpubkey size
-encode_uint32_le(script_len, buffer + pos);
-pos++;
+	// Encode scriptpubkey size
+	encode_uint32_le(script_len, buffer + pos);
+	pos++;
 	// Copy over scriptpubkey
 	memcpy(buffer + pos, script, script_len);
 	pos += script_len;
@@ -588,19 +584,20 @@ printf("Change SPK\n");
 		// Encode amount to be sent back as change
 		encode_uint64_le(change, buffer + pos);
 		pos += 8;
-// Encode scriptpubkey size
-encode_uint32_le(script_len, buffer + pos);
-pos++;
+		// Encode scriptpubkey size
+		encode_uint32_le(script_len, buffer + pos);
+		pos++;
 		// Copy over scriptpubkey of your change address
 		memcpy(buffer + pos, script, script_len);
 		pos += script_len;
 	}
-	// Witness placeholder
-	for (int i = 0; i < num_selected; i++) {
+	// Witness placeholder per input
+/*	for (int i = 0; i < num_selected; i++) {
 		buffer[pos++] = 0x02; // 2 witness stack items(signature + pubkey)
 		buffer[pos++] = 0x00; // Placeholder for signature
 		buffer[pos++] = 0x00; // Placeholder for pubkey
 	}
+*/
 	// Locktime
 	encode_uint32_le(0, buffer + pos);
 	pos += 4;
@@ -620,8 +617,311 @@ printf("Raw Tx Hex: %s\n", raw_tx_hex);
 	return 0;
 }
 
-int sign_transaction(char *raw_tx_hex, utxo_t *selected, int num_selected) {
+// Helper: Double SHA256 hash
+static void double_sha256(const uint8_t *data, size_t len, uint8_t *hash) {
+    	gcry_md_hd_t hd;
+    	gcry_md_open(&hd, GCRY_MD_SHA256, 0);
+    	gcry_md_write(hd, data, len);
+    	gcry_md_final(hd);
+    	uint8_t temp[32];
+    	memcpy(temp, gcry_md_read(hd, GCRY_MD_SHA256), 32);
+    	gcry_md_close(hd);
+    	gcry_md_open(&hd, GCRY_MD_SHA256, 0);
+    	gcry_md_write(hd, temp, 32);
+    	gcry_md_final(hd);
+    	memcpy(hash, gcry_md_read(hd, GCRY_MD_SHA256), 32);
+    	gcry_md_close(hd);
+}
+
+int extract_pub_key_hash_from_script(const char *script_pub_key, uint8_t *pub_key_hash) {
+	if (!script_pub_key || strlen(script_pub_key) != 44) {
+		fprintf(stderr, "Invalid script pub key\n");
+		return 1;
+	}
+	if (strncmp(script_pub_key, "0014", 4) != 0) {
+		fprintf(stderr, "Not a P2WPKH script pub key\n");
+		return 1;
+	}
+	hex_to_bytes(script_pub_key + 4, pub_key_hash, 20);
 	return 0;
+}
+
+int construct_scriptcode(uint8_t *pub_key_hash, char *scriptcode) {
+	if (!pub_key_hash) {
+		fprintf(stderr, "Invalid inputs\n");
+		return 1;
+	}
+	strcpy(scriptcode, "1976a914");
+	bytes_to_hex(pub_key_hash, 20, scriptcode + 8, 41);
+	strcat(scriptcode, "88ac");
+	return 0;
+}
+
+
+
+int construct_preimage(char *raw_tx_hex, utxo_t *selected) {
+printf("Full hex: %s\n", raw_tx_hex);
+	if (!raw_tx_hex || !selected) {
+		fprintf(stderr, "Invalid inputs\n");
+		return 1;
+	}
+	size_t tx_len = strlen(raw_tx_hex) / 2;
+	uint8_t *tx_data = malloc(tx_len);
+	if (!tx_data) {
+		fprintf(stderr, "Failed to allocate tx_data\n");
+		return 1;
+	}
+	hex_to_bytes(raw_tx_hex, tx_data, tx_len);
+	size_t pos = 0;
+	// Version (4 byte)
+	uint8_t version[4];
+	memcpy(version, tx_data + pos, 4);
+	pos += 4;
+	// Skip marker and flag (2 bytes)
+	pos += 2;
+	// Input count (varint, assuming small, 1 byte)
+	int num_inputs = tx_data[pos];
+	pos += 1;
+printf("Num_inputs: %d\n", num_inputs);
+	// Parse inputs and serialize outpoints + sequences
+	uint8_t *outpoints = malloc(num_inputs * 36); // 32 txid + 4 vout
+	uint8_t *sequences = malloc(num_inputs * 4);
+	if (!outpoints || !sequences) {
+		free(tx_data);
+		fprintf(stderr, "Failure allocating outpoints and sequences\n");
+		return 1;
+	}
+	size_t outpoints_pos = 0;
+	size_t sequences_pos = 0;
+	for (int i = 0; i < num_inputs; i++) {
+		// TxId (32 bytes)
+		memcpy(outpoints + outpoints_pos, tx_data + pos, 32);
+		outpoints_pos += 32;
+		pos += 32;
+		// Vout (4 bytes)
+		memcpy(outpoints + outpoints_pos, tx_data + pos, 4);
+		outpoints_pos += 4;
+		pos += 4;
+		// Skip scriptsig
+		pos += 1;
+		// Sequence (4 bytes)
+		memcpy(sequences + sequences_pos, tx_data + pos, 4);
+		sequences_pos += 4;
+		pos += 4;
+	}
+	// Hash outpoints
+	uint8_t hash_prevouts[32];
+	double_sha256(outpoints, num_inputs * 36, hash_prevouts);
+print_bytes_as_hex("Hash Prevouts", hash_prevouts, 32);
+	free(outpoints);
+	// Hash sequences
+	uint8_t hash_sequence[32];
+	double_sha256(sequences, num_inputs * 4, hash_sequence);
+print_bytes_as_hex("Hash Sequence", hash_sequence, 32);
+	free(sequences);
+	// Output count (varint, assume small, 1 byte)
+	int num_outputs = tx_data[pos];
+	pos += 1;
+printf("Num_outputs: %d\n", num_outputs);
+	// Parse outputs and serialize
+	uint8_t *outputs_serialized = malloc(num_outputs * (8 + 1 + 22)); // Amount (8 bytes) and script ~22 for P2WPKH
+	if (!outputs_serialized) {
+		free(tx_data);
+		fprintf(stderr, "Failed to allocate outputs_serialized\n");
+		return 1;
+	}
+	size_t outputs_pos = 0;
+	for (int i = 0; i < num_outputs; i++) {
+		// Amount (8 bytes)
+		memcpy(outputs_serialized + outputs_pos, tx_data + pos, 8);
+		outputs_pos += 8;
+		pos += 8;
+		// Script length (1 byte)
+		uint8_t script_len = tx_data[pos];
+		memcpy(outputs_serialized + outputs_pos, &script_len, 1);
+		outputs_pos += 1;
+		pos += 1;
+		// Script (~22 bytes)
+		memcpy(outputs_serialized + outputs_pos, tx_data + pos, script_len);
+		outputs_pos += script_len;
+		pos += script_len;
+	}
+print_bytes_as_hex("Outputs Serialized", outputs_serialized, 62);
+	uint8_t hash_outputs[32];
+	double_sha256(outputs_serialized, outputs_pos, hash_outputs);
+print_bytes_as_hex("Hash outputs", hash_outputs, 32);
+	free(outputs_serialized);
+	// Locktime (4 bytes)
+	uint8_t locktime[4];
+	memcpy(locktime, tx_data + pos, 4);
+	pos += 4;
+print_bytes_as_hex("Lock time", locktime, 4);
+	// Sighash type (4 bytes)
+	uint8_t sighash_type [4];
+	encode_uint32_le(SIGHASH_ALL, sighash_type);
+print_bytes_as_hex("Sighash type", sighash_type, 4);
+	// Prepare preimage = 
+	// version + hash256(inputs) + hash256(sequences) + (num_inputs * (input(txid + vout)) + scriptcode + amount + sequence) + hash256(outputs) + locktime	
+	size_t preimage_len = 4 + 32 + 32 + ((36 + 25 + 8 + 4) * nums_inputs) + 32 + 4; 
+	uint8_t *preimage = malloc(preimage_len);
+	if (!preimage) {
+		free(tx_data);
+		fprintf(stderr, "Failed to allocate preimage\n");
+		return 1;
+	}
+	size_t preimage_pos = 0;
+	// Version
+	memcpy(preimage + preimage_pos, version, 4);
+	preimage_pos += 4;
+	// HashPrevouts
+	memcpy(preimage + preimage_pos, hash_prevouts, 32);
+	preimage_pos += 32;
+	// HashSequence
+	memcpy(preimage + preimage_pos, hash_sequence, 32);
+	preimage_pos += 32;
+print_bytes_as_hex("After Vers, HashPrevouts, HashSequence", preimage, pos);
+	for (int i = 0; i < num_inputs; i++) {
+		// Outpoint (txid + vout for one input)
+		uint8_t outpoint[36];
+		memcpy(outpoint, tx_data + 6, 32); // TxID
+		memcpy(outpoint + 32, tx_data + 38, 4); // vout
+		memcpy(preimage + preimage_pos, outpoint, 36);
+		preimage_pos += 36;
+print_bytes_as_hex("After Outpoint (txid and vout)", preimage, pos);
+		// ScriptCode (P2PKH format: 1976a914<hash>88ac)
+		uint8_t pub_key_hash[20];
+		if (extract_pub_key_hash_from_script(, pub_key_hash) != 0) {
+			free(tx_data);
+			fprintf(stderr, "Error extracting pub key hash\n");
+			return 1;		
+		}
+		char scriptcode[50];
+		if (construct_scriptcode(pub_key_hash, scriptcode) != 0) {
+			free(tx_data);
+			fprintf(stderr, "Error constructing scriptcode\n");
+			return 1;
+		}
+		uint8_t scriptcode_bytes[25];
+		hex_to_bytes(scriptcode, scriptcode_bytes, 25);
+		memcpy(preimage + preimage_pos, scriptcode_bytes, 25);
+		preimage_pos += 25;
+print_bytes_as_hex("After Scriptcode bytes", preimage, pos);
+		// Amount
+		uint8_t amount[8];
+		encode_uint64_le(input_amount, amount);
+		memcpy(preimage + preimage_pos, amount, 8);
+		preimage_pos += 8;
+		// Sequence
+		memcpy(preimage + preimage_pos, tx_data + 43, 4); 
+		preimage_pos += 4;
+print_bytes_as_hex("After amount and sequence", preimage, pos);
+	}
+	// HashOutputs
+	memcpy(preimage + preimage_pos, hash_outputs, 32);
+	preimage_pos += 32;
+	// Locktime
+	memcpy(preimage + preimage_pos, locktime, 4);
+	preimage_pos += 4;
+print_bytes_as_hex("After Hashoutputs and Locktime", preimage, pos);
+	// Sighash type
+	uint8_t sighash[32];
+	double_sha256(preimage, preimage_pos, sighash);
+print_bytes_as_hex("Sighash", sighash, 32);
+	free(preimage);
+	free(tx_data);
+	return 0; 
+}
+
+
+int sign_transaction(char *raw_tx_hex, utxo_t *selected, int num_selected) {
+	if (!raw_tx_hex || !selected || num_selected <= 0) {
+		fprintf(stderr, "Invalid inputs\n");
+		return 1;
+	}
+
+	if (construct_preimage(raw_tx_hex, selected) != 0) {
+		fprintf(stderr, "construct_preimage() failure\n");	
+		return 1;
+	}
+
+	// Convert hex to bytes
+	size_t tx_len = strlen(raw_tx_hex) / 2;
+	uint8_t *tx_data = malloc(tx_len);
+	if (!tx_data) {
+		fprintf(stderr, "Failure to allocate tx_data\n");
+		return 1;
+	}
+	hex_to_bytes(raw_tx_hex, tx_data, tx_len);
+	uint8_t sighash[4];
+	encode_uint32_le((uint32_t)SIGHASH_ALL, sighash);
+	
+
+
+	return 0;
+
+
+
+
+
+	// Append witnesses
+	size_t witness_pos = tx_len; // Append at end (after locktime)
+	size_t new_tx_len = tx_len + num_selected * (1 + 72 + 1 + 33); // Approx. witness size
+	uint8_t *new_tx_data = realloc(tx_data, new_tx_len);
+	if (!new_tx_data) {
+		free(tx_data);
+		fprintf(stderr, "Failure to allocate new_tx_data\n");
+		return 1;
+	}
+	tx_data = new_tx_data;
+	for (int i = 0; i < num_selected; i++) {
+		// Sign with private key
+		gcry_sexp_t priv_sexp, sig_sexp;
+		gcry_sexp_build(&priv_sexp, NULL, "(private-key (ecc (curve SecP256k1) (d %b)))", PRIVKEY_LENGTH, selected[i].key->key_priv);
+		gcry_sexp_build(&sig_sexp, NULL, "(data (flags raw) (hash algo sha256) (value %b))", 32, sighash);
+		gcry_pk_sign(&sig_sexp, priv_sexp, sig_sexp);
+		gcry_sexp_t r, s;
+		r = gcry_sexp_find_token(sig_sexp, "r", 0);
+		s = gcry_sexp_find_token(sig_sexp, "s", 0);
+		size_t r_len, s_len;
+		const uint8_t *r_data = gcry_sexp_nth_data(r, 1, &r_len);
+		const uint8_t *s_data = gcry_sexp_nth_data(s, 1, &s_len);
+		uint8_t sig[72];
+		sig[0] = 0x30;
+		sig[1] = r_len + s_len + 4;
+		sig[2] = 0x02;
+		sig[3] = r_len;
+		memcpy(sig + 4, r_data, r_len);
+		sig[4 + r_len] = 0x02;
+		sig[5 + r_len] = s_len;
+		memcpy(sig + 6 + r_len, s_data, s_len);
+		size_t sig_len = 6 + r_len + s_len;
+		gcry_sexp_release(priv_sexp);
+		gcry_sexp_release(sig_sexp);
+		gcry_sexp_release(r);
+		gcry_sexp_release(s);	
+		
+		// Append to witness
+		tx_data[witness_pos++] = 0x02; // Stack items
+		tx_data[witness_pos++] = sig_len;
+		memcpy(tx_data + witness_pos, sig, sig_len);
+		witness_pos += sig_len;
+		tx_data[witness_pos++] = PUBKEY_LENGTH;
+		memcpy(tx_data + witness_pos, selected[i].key->key_pub_compressed, PUBKEY_LENGTH);
+		witness_pos += PUBKEY_LENGTH;
+	}
+	// Update raw_tx_hex with signed tx
+    	char *new_raw_tx_hex = malloc(witness_pos * 2 + 1);
+    	if (!new_raw_tx_hex) {
+		free(tx_data);
+		fprintf(stderr, "Failed to allocate new_raw_tx_hex\n");
+		return 1;
+    	}
+    	bytes_to_hex(tx_data, witness_pos, new_raw_tx_hex, witness_pos * 2 + 1);
+    	free(raw_tx_hex); // Free original unsigned hex
+    	raw_tx_hex = new_raw_tx_hex;
+
+    	free(tx_data);
+    	return 0;
 }
 
 int broadcast_transaction(const char *raw_tx_hex, time_t *last_request) {

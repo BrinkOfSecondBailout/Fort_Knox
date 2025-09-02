@@ -42,6 +42,54 @@ void zero_and_gcry_free_multiple(size_t size, void *buf, ...) {
 	va_end(args);
 }
 
+int decimal_to_int_le(const char *decimal, size_t len, int *value) {
+	if (!decimal || !value) {
+		fprintf(stderr, "Invalid input\n");
+		return 1;
+	}
+	for (int i = 0; i < len; i++) {
+        	if (!isdigit(decimal[i])) {
+            		fprintf(stderr, "Invalid decimal character: %c\n", decimal[i]);
+            		return -1;
+        	}
+    	}
+	char decimal_clean[len + 1];
+    	strncpy(decimal_clean, decimal, len);
+    	decimal_clean[len] = '\0';
+    	int result;
+    	if (sscanf(decimal_clean, "%2d", &result) != 1 || result < 0 || result > 99) {
+        	fprintf(stderr, "Failed to parse decimal string or out of range: %s\n", decimal_clean);
+        	return -1;
+    	}
+    	*value = result;
+	return 0;
+}
+
+int hex_to_int(const char *hex, size_t len, int *value) {
+	if (!hex || !value) {
+		fprintf(stderr, "Invalid input\n");
+		return 1;
+	} 
+	char hex_clean[len + 1];
+	for (size_t i = 0; i < len; i++) {
+		hex_clean[i] = tolower(hex[0]);
+	}
+	hex_clean[len] = '\0';
+	for (size_t i = 0; i < len; i++) {
+        	if (!isxdigit(hex_clean[i])) {
+            		fprintf(stderr, "Invalid hex character: %c\n", hex_clean[i]);
+            		return -1;
+        	}
+    	}
+	unsigned int result;
+    	if (sscanf(hex_clean, "%2x", &result) != 1) {
+       		fprintf(stderr, "Failed to parse hex string: %s\n", hex_clean);
+        	return -1;
+    	}
+    	*value = (int)result;
+	return 0;
+}
+
 // Helper: Hex to bytes
 void hex_to_bytes(const char *hex, uint8_t *bytes, size_t len) {
   	for (size_t i = 0; i < len; i++) {
@@ -230,7 +278,6 @@ int pubkeyhash_to_address(const uint8_t *pub_key_hash, size_t pub_key_hash_len, 
 // Convert compressed pub to P2WPKH (Segwit) address
 int pubkey_to_address(const uint8_t *pub_key, size_t pub_key_len, char *address, size_t address_len) {
 	if (pub_key_len != PUBKEY_LENGTH || !address) return -1;
-//printf("\n");
 //print_bytes_as_hex("Original pub key (33 bytes)", pub_key, pub_key_len);
 	// Compute SHA256
 	uint8_t sha256[32];
@@ -566,7 +613,6 @@ int generate_address(const uint8_t *key_pub_compressed, char *address, size_t ad
 }
 
 int derive_from_change_to_child(const key_pair_t *change_key, uint32_t child_index, key_pair_t *child_key) {
-//printf("Deriving from change to child\n");
 	// Derive from change to child - m/44'/0'/0'/account/change/index
 	int result = derive_child_key(change_key, child_index, child_key); // m/44'/0'/account'/change/index
 	if (result != 0) {
@@ -579,7 +625,6 @@ int derive_from_change_to_child(const key_pair_t *change_key, uint32_t child_ind
 }
 
 int derive_from_account_to_change(const key_pair_t *account_key, uint32_t change_index, key_pair_t *change_key) {
-//printf("Deriving from account to change\n");
 	// Derive from account to change - m/44'/0'/0'/account/change/
 	int result = derive_child_key(account_key, change_index, change_key); // m'/44'/0'/account'/change	
 	if (result != 0) {
@@ -591,9 +636,7 @@ int derive_from_account_to_change(const key_pair_t *account_key, uint32_t change
 	return 0;
 }
 
-// Derive from public key all the way up to account - m/purpose'/coin'/account'/
 int derive_from_public_to_account(const key_pair_t *pub_key, uint32_t account_index, key_pair_t *account_key) {
-//printf("Deriving from public to account\n");
 	// Derive from public to account - m/44'/0'/0'/account
 	key_pair_t *purpose_key = NULL;
 	purpose_key = gcry_malloc_secure(sizeof(key_pair_t));
@@ -765,7 +808,6 @@ int init_curl_and_addresses(const char **addresses, int num_addresses, curl_buff
 		strncat(addr_list, addresses[i], sizeof(addr_list) - strlen(addr_list) - 2);
 		if (i < num_addresses - 1) strncat(addr_list, "|", sizeof(addr_list) - strlen(addr_list) - 2);
 	}
-//printf("Addr_List: %s\n", addr_list);
 	char url[2048];
 	snprintf(url, sizeof(url), "https://blockchain.info/multiaddr?active=%s", addr_list);
 	

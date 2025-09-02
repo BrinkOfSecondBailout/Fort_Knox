@@ -386,13 +386,23 @@ int run_bech32_decoder() {
 	return failures;
 }
 
+int run_construct_preimage() {
+	char *raw_tx_hex = "02000000000101f5ab6a10237e6d002133b93162f0ae22f1646d6a0fa6e77e6d341dffac6b0df10200000000ffffffff02e803000000000000160014aa7c6ca46df982bfae265f1429325e41b6ffe30d7102000000000000160014572e6abcefad78e89be54fc79ae37a5c18e8cda700000000";
+	if (construct_preimage(raw_tx_hex) != 0) {
+		fprintf(stderr, "construct_preimage() failure\n");
+		return 1;
+	}
+	return 0;
+}
+
 int main() {
 	int failures = 0; 
 	//failures += run_mnemonic_test();
 	//failures += run_master_and_child_test(); 
 	//failures += run_mnemonic_recovery_test();
 	//failures += run_address_generation_test();
-	run_bech32_decoder();
+	//failures += run_bech32_decoder();
+	failures += run_construct_preimage();
     	printf("Total failures: %d\n", failures);
     	return failures > 0 ? 1 : 0;
 }
