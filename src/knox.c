@@ -817,6 +817,7 @@ int32 send_handle(User *user) {
 	}	
 	char *raw_tx_hex = NULL;
 	result = build_transaction(recipient, amount, &selected, num_selected, change_back_key, fee, raw_tx_hex);
+
 //	sign_transaction();
 //	broadcast_transaction();	
 		

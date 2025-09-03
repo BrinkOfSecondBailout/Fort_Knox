@@ -171,6 +171,7 @@ long long query_utxos(char **addresses, int num_addresses, utxo_t **utxos, int *
 			// Extract 20-byte pubkeyhash from script (skip 0014)
 			uint8_t hash[20];
 			hex_to_bytes(script_hex + 4, hash, 20);
+			// Turn the pkh to address
 			result = pubkeyhash_to_address(hash, 22, utxo_address, ADDRESS_MAX_LEN);
 			if (result != 0) {
 				fprintf(stderr, "Failure converting witness program to address\n");
@@ -501,8 +502,7 @@ int build_transaction(const char *recipient, long long amount, utxo_t **selected
 	// Version (2 for segwit)
 	encode_uint32_le(TX_VERSION, buffer + pos);
 	pos += 4;
-	// Marker and flag
-	buffer[pos++] = 0x00;
+	// Marker andcharbuffer[pos++] = 0x00;
 	buffer[pos++] = 0x01;
 	// Input count
 	uint8_t varint_buf[9];
@@ -633,45 +633,23 @@ static void double_sha256(const uint8_t *data, size_t len, uint8_t *hash) {
     	gcry_md_close(hd);
 }
 
-int extract_pub_key_hash_from_script(const char *script_pub_key, uint8_t *pub_key_hash) {
-	if (!script_pub_key || strlen(script_pub_key) != 44) {
-		fprintf(stderr, "Invalid script pub key\n");
-		return 1;
-	}
-	if (strncmp(script_pub_key, "0014", 4) != 0) {
-		fprintf(stderr, "Not a P2WPKH script pub key\n");
-		return 1;
-	}
-	hex_to_bytes(script_pub_key + 4, pub_key_hash, 20);
-	return 0;
-}
-
-int construct_scriptcode(uint8_t *pub_key_hash, char *scriptcode) {
-	if (!pub_key_hash) {
+int construct_scriptcode(uint8_t *pubkeyhash, char *scriptcode) {
+	if (!pubkeyhash) {
 		fprintf(stderr, "Invalid inputs\n");
 		return 1;
 	}
 	strcpy(scriptcode, "1976a914");
-	bytes_to_hex(pub_key_hash, 20, scriptcode + 8, 41);
+	bytes_to_hex(pubkeyhash, 20, scriptcode + 8, 41);
 	strcat(scriptcode, "88ac");
+printf("Scriptcode: %s\n", scriptcode);
 	return 0;
 }
 
-
-
-int construct_preimage(char *raw_tx_hex, utxo_t *selected) {
-printf("Full hex: %s\n", raw_tx_hex);
-	if (!raw_tx_hex || !selected) {
+int construct_preimage(uint8_t *tx_data, size_t tx_len, utxo_t *selected, int num_selected, uint8_t *sighash) {
+	if (!tx_data || !selected || num_selected <= 0) {
 		fprintf(stderr, "Invalid inputs\n");
 		return 1;
 	}
-	size_t tx_len = strlen(raw_tx_hex) / 2;
-	uint8_t *tx_data = malloc(tx_len);
-	if (!tx_data) {
-		fprintf(stderr, "Failed to allocate tx_data\n");
-		return 1;
-	}
-	hex_to_bytes(raw_tx_hex, tx_data, tx_len);
 	size_t pos = 0;
 	// Version (4 byte)
 	uint8_t version[4];
@@ -762,7 +740,7 @@ print_bytes_as_hex("Lock time", locktime, 4);
 print_bytes_as_hex("Sighash type", sighash_type, 4);
 	// Prepare preimage = 
 	// version + hash256(inputs) + hash256(sequences) + (num_inputs * (input(txid + vout)) + scriptcode + amount + sequence) + hash256(outputs) + locktime	
-	size_t preimage_len = 4 + 32 + 32 + ((36 + 25 + 8 + 4) * nums_inputs) + 32 + 4; 
+	size_t preimage_len = 4 + 32 + 32 + ((36 + 25 + 8 + 4) * num_inputs) + 32 + 4; 
 	uint8_t *preimage = malloc(preimage_len);
 	if (!preimage) {
 		free(tx_data);
@@ -779,24 +757,30 @@ print_bytes_as_hex("Sighash type", sighash_type, 4);
 	// HashSequence
 	memcpy(preimage + preimage_pos, hash_sequence, 32);
 	preimage_pos += 32;
-print_bytes_as_hex("After Vers, HashPrevouts, HashSequence", preimage, pos);
+print_bytes_as_hex("After Vers, HashPrevouts, HashSequence", preimage, preimage_pos);
 	for (int i = 0; i < num_inputs; i++) {
-		// Outpoint (txid + vout for one input)
+		// Outpoint (txid + vout per input)
 		uint8_t outpoint[36];
 		memcpy(outpoint, tx_data + 6, 32); // TxID
 		memcpy(outpoint + 32, tx_data + 38, 4); // vout
 		memcpy(preimage + preimage_pos, outpoint, 36);
 		preimage_pos += 36;
-print_bytes_as_hex("After Outpoint (txid and vout)", preimage, pos);
+print_bytes_as_hex("After Outpoint (txid and vout)", preimage, preimage_pos);
 		// ScriptCode (P2PKH format: 1976a914<hash>88ac)
-		uint8_t pub_key_hash[20];
-		if (extract_pub_key_hash_from_script(, pub_key_hash) != 0) {
+		uint8_t pubkeyhash[20];
+		if (i < num_selected) {
+			if (key_to_pubkeyhash((selected)[i].key, pubkeyhash) != 0) {
+				free(tx_data);
+				fprintf(stderr, "Error extracting pub key hash\n");
+				return 1;		
+			}
+		} else {
 			free(tx_data);
-			fprintf(stderr, "Error extracting pub key hash\n");
-			return 1;		
+			fprintf(stderr, "Number of inputs mismatch with UTXOs selected\n");
+			return 1;	
 		}
 		char scriptcode[50];
-		if (construct_scriptcode(pub_key_hash, scriptcode) != 0) {
+		if (construct_scriptcode(pubkeyhash, scriptcode) != 0) {
 			free(tx_data);
 			fprintf(stderr, "Error constructing scriptcode\n");
 			return 1;
@@ -805,16 +789,16 @@ print_bytes_as_hex("After Outpoint (txid and vout)", preimage, pos);
 		hex_to_bytes(scriptcode, scriptcode_bytes, 25);
 		memcpy(preimage + preimage_pos, scriptcode_bytes, 25);
 		preimage_pos += 25;
-print_bytes_as_hex("After Scriptcode bytes", preimage, pos);
+print_bytes_as_hex("After Scriptcode bytes", preimage, preimage_pos);
 		// Amount
 		uint8_t amount[8];
-		encode_uint64_le(input_amount, amount);
+		encode_uint64_le((selected)[i].amount, amount);
 		memcpy(preimage + preimage_pos, amount, 8);
 		preimage_pos += 8;
 		// Sequence
 		memcpy(preimage + preimage_pos, tx_data + 43, 4); 
 		preimage_pos += 4;
-print_bytes_as_hex("After amount and sequence", preimage, pos);
+print_bytes_as_hex("After amount and sequence", preimage, preimage_pos);
 	}
 	// HashOutputs
 	memcpy(preimage + preimage_pos, hash_outputs, 32);
@@ -822,105 +806,138 @@ print_bytes_as_hex("After amount and sequence", preimage, pos);
 	// Locktime
 	memcpy(preimage + preimage_pos, locktime, 4);
 	preimage_pos += 4;
-print_bytes_as_hex("After Hashoutputs and Locktime", preimage, pos);
+print_bytes_as_hex("After Hashoutputs and Locktime", preimage, preimage_pos);
 	// Sighash type
-	uint8_t sighash[32];
 	double_sha256(preimage, preimage_pos, sighash);
 print_bytes_as_hex("Sighash", sighash, 32);
 	free(preimage);
-	free(tx_data);
 	return 0; 
 }
 
+int sign_preimage_hash(uint8_t *sighash, uint8_t *privkey, uint8_t *witness, size_t *witness_len, uint8_t *pubkey) {
+	if (!sighash || !privkey || !pubkey) {
+		fprintf(stderr, "Input errors\n");
+		return 1;
+	}
+print_bytes_as_hex("Private key", privkey, PRIVKEY_LENGTH);
+print_bytes_as_hex("Public key", pubkey, PUBKEY_LENGTH);
+	uint8_t encoded_sig[72];
+	size_t sig_len = 0;
+	// Sign with private key
+	gcry_sexp_t priv_sexp, data_sexp, sig_sexp;
+	gcry_error_t err;
+	err = gcry_sexp_build(&priv_sexp, NULL, "(private-key (ecc (curve SecP256k1) (d %b)))", PRIVKEY_LENGTH, privkey);
+	if (err) {
+		fprintf(stderr, "Failed to build priv_sexp: %s\n", gcry_strerror(err));
+		return 1;
+	}
+	err = gcry_sexp_build(&data_sexp, NULL, "(data (flags raw) (hash algo sha256) (value %b))", 32, sighash);
+	if (err) {
+		gcry_sexp_release(priv_sexp);
+		fprintf(stderr, "Failed to build data_sexp: %s\n", gcry_strerror(err));
+		return 1;
+	}
+	err = gcry_pk_sign(&sig_sexp, data_sexp, priv_sexp);
+	if (err) {
+		gcry_sexp_release(data_sexp);
+		gcry_sexp_release(priv_sexp);
+		fprintf(stderr, "Failed to sign: %s\n", gcry_strerror(err));
+		return 1;
+	}
+
+	gcry_sexp_t r, s;
+	r = gcry_sexp_find_token(sig_sexp, "r", 0);
+	s = gcry_sexp_find_token(sig_sexp, "s", 0);
+	if (!r || !s) {
+		gcry_sexp_release(sig_sexp);
+		gcry_sexp_release(data_sexp);
+		gcry_sexp_release(priv_sexp);
+		fprintf(stderr, "Failed to find r or s in signature\n");
+		return 1;
+	}
+	size_t r_len, s_len;
+	const void *r_data = gcry_sexp_nth_data(r, 1, &r_len);
+	const void *s_data = gcry_sexp_nth_data(s, 1, &s_len);
+print_bytes_as_hex("Signature R", r_data, r_len);
+print_bytes_as_hex("Signature S", s_data, s_len);
+printf("r_len: %zu\n", r_len);
+printf("s_len: %zu\n", s_len);
+	// DER encode the signature
+	encoded_sig[0] = 0x30;
+	encoded_sig[1] = r_len + s_len + 4;
+	encoded_sig[2] = 0x02;
+	encoded_sig[3] = r_len;
+	memcpy(encoded_sig + 4, r_data, r_len);
+	encoded_sig[4 + r_len] = 0x02;
+	encoded_sig[5 + r_len] = s_len;
+	memcpy(encoded_sig + 6 + r_len, s_data, s_len);
+	// Append signature hash type
+	encoded_sig[6 + s_len] = 0x01;
+	sig_len = 7 + r_len + s_len;
+	encoded_sig[sig_len] = '\0';
+print_bytes_as_hex("Serialized DER Encoded Signature (with Sighash type)", encoded_sig, sig_len);
+	gcry_sexp_release(priv_sexp);
+	gcry_sexp_release(sig_sexp);
+	gcry_sexp_release(r);
+	gcry_sexp_release(s);
+	// Construct full witness
+	witness[0] = 0x02;
+	witness[1] = sig_len;
+	memcpy(witness + 3, encoded_sig, sig_len);
+	witness[3 + sig_len] = PUBKEY_LENGTH;
+	memcpy(witness + 4 + sig_len, pubkey, PUBKEY_LENGTH);
+	*witness_len = 3 + sig_len + PUBKEY_LENGTH;
+print_bytes_as_hex("Full serialized witness", witness, *witness_len);	
+	return 0;
+}
 
 int sign_transaction(char *raw_tx_hex, utxo_t *selected, int num_selected) {
 	if (!raw_tx_hex || !selected || num_selected <= 0) {
 		fprintf(stderr, "Invalid inputs\n");
 		return 1;
 	}
-
-	if (construct_preimage(raw_tx_hex, selected) != 0) {
-		fprintf(stderr, "construct_preimage() failure\n");	
-		return 1;
-	}
-
-	// Convert hex to bytes
 	size_t tx_len = strlen(raw_tx_hex) / 2;
 	uint8_t *tx_data = malloc(tx_len);
 	if (!tx_data) {
-		fprintf(stderr, "Failure to allocate tx_data\n");
+		fprintf(stderr, "Failed to allocate tx_data\n");
 		return 1;
 	}
 	hex_to_bytes(raw_tx_hex, tx_data, tx_len);
-	uint8_t sighash[4];
-	encode_uint32_le((uint32_t)SIGHASH_ALL, sighash);
-	
-
-
-	return 0;
-
-
-
-
-
+	uint8_t sighash[32];
+	if (construct_preimage(tx_data, tx_len, selected, num_selected, sighash) != 0) {
+		fprintf(stderr, "construct_preimage() failure\n");	
+		return 1;
+	}
 	// Append witnesses
 	size_t witness_pos = tx_len; // Append at end (after locktime)
-	size_t new_tx_len = tx_len + num_selected * (1 + 72 + 1 + 33); // Approx. witness size
-	uint8_t *new_tx_data = realloc(tx_data, new_tx_len);
+	size_t new_tx_len = tx_len + (num_selected * 108); // Approx. witness size
+	uint8_t *new_tx_data = (uint8_t *)realloc(tx_data, new_tx_len);
 	if (!new_tx_data) {
 		free(tx_data);
 		fprintf(stderr, "Failure to allocate new_tx_data\n");
 		return 1;
 	}
-	tx_data = new_tx_data;
 	for (int i = 0; i < num_selected; i++) {
-		// Sign with private key
-		gcry_sexp_t priv_sexp, sig_sexp;
-		gcry_sexp_build(&priv_sexp, NULL, "(private-key (ecc (curve SecP256k1) (d %b)))", PRIVKEY_LENGTH, selected[i].key->key_priv);
-		gcry_sexp_build(&sig_sexp, NULL, "(data (flags raw) (hash algo sha256) (value %b))", 32, sighash);
-		gcry_pk_sign(&sig_sexp, priv_sexp, sig_sexp);
-		gcry_sexp_t r, s;
-		r = gcry_sexp_find_token(sig_sexp, "r", 0);
-		s = gcry_sexp_find_token(sig_sexp, "s", 0);
-		size_t r_len, s_len;
-		const uint8_t *r_data = gcry_sexp_nth_data(r, 1, &r_len);
-		const uint8_t *s_data = gcry_sexp_nth_data(s, 1, &s_len);
-		uint8_t sig[72];
-		sig[0] = 0x30;
-		sig[1] = r_len + s_len + 4;
-		sig[2] = 0x02;
-		sig[3] = r_len;
-		memcpy(sig + 4, r_data, r_len);
-		sig[4 + r_len] = 0x02;
-		sig[5 + r_len] = s_len;
-		memcpy(sig + 6 + r_len, s_data, s_len);
-		size_t sig_len = 6 + r_len + s_len;
-		gcry_sexp_release(priv_sexp);
-		gcry_sexp_release(sig_sexp);
-		gcry_sexp_release(r);
-		gcry_sexp_release(s);	
-		
+		uint8_t witness[108];
+		size_t witness_len = 0;
+		if (sign_preimage_hash(selected[i].key->key_priv, sighash, witness, &witness_len, selected[i].key->key_pub_compressed) != 0) {
+			fprintf(stderr, "Failure to sign preimage hash\n");
+			return 1;
+		}
 		// Append to witness
-		tx_data[witness_pos++] = 0x02; // Stack items
-		tx_data[witness_pos++] = sig_len;
-		memcpy(tx_data + witness_pos, sig, sig_len);
-		witness_pos += sig_len;
-		tx_data[witness_pos++] = PUBKEY_LENGTH;
-		memcpy(tx_data + witness_pos, selected[i].key->key_pub_compressed, PUBKEY_LENGTH);
-		witness_pos += PUBKEY_LENGTH;
+		memcpy(new_tx_data + witness_pos, witness, witness_len);
+		witness_pos += witness_len;
 	}
-	// Update raw_tx_hex with signed tx
-    	char *new_raw_tx_hex = malloc(witness_pos * 2 + 1);
+    	char *new_raw_tx_hex = malloc(new_tx_len * 2);
     	if (!new_raw_tx_hex) {
-		free(tx_data);
+		free(new_tx_data);
 		fprintf(stderr, "Failed to allocate new_raw_tx_hex\n");
 		return 1;
     	}
-    	bytes_to_hex(tx_data, witness_pos, new_raw_tx_hex, witness_pos * 2 + 1);
-    	free(raw_tx_hex); // Free original unsigned hex
+    	bytes_to_hex(new_tx_data, new_tx_len, new_raw_tx_hex, new_tx_len * 2);
     	raw_tx_hex = new_raw_tx_hex;
-
-    	free(tx_data);
+printf("FINAL:\n%s\n", raw_tx_hex);
+	free(new_tx_data);
     	return 0;
 }
 

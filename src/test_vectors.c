@@ -2,6 +2,7 @@
 #include "mnemonic.h"
 #include "common.h"
 #include "wallet.h"
+#include "crypt.h"
 #include "utxo.h"
 #include "test_vectors.h"
 
@@ -386,12 +387,39 @@ int run_bech32_decoder() {
 	return failures;
 }
 
-int run_construct_preimage() {
+int run_sign_transaction_test() {
 	char *raw_tx_hex = "02000000000101f5ab6a10237e6d002133b93162f0ae22f1646d6a0fa6e77e6d341dffac6b0df10200000000ffffffff02e803000000000000160014aa7c6ca46df982bfae265f1429325e41b6ffe30d7102000000000000160014572e6abcefad78e89be54fc79ae37a5c18e8cda700000000";
-	if (construct_preimage(raw_tx_hex) != 0) {
+	utxo_t *selected = malloc(1 * sizeof(utxo_t)); // 1 input
+    if (!selected) {
+        fprintf(stderr, "Failed to allocate selected UTXO\n");
+        return 1;
+    }
+    selected[0].vout = 2; // From sample hex
+    selected[0].amount = 1825; // Test amount; adjust based on your sample tx
+    strncpy(selected[0].address, "bc1qnrcq57vr0uhycpv4yvrhnz2urr334ax2av5aar", ADDRESS_MAX_LEN); // Test address
+
+    // Dummy key
+    selected[0].key = gcry_malloc_secure(sizeof(key_pair_t));
+    if (!selected[0].key) {
+        free(selected);
+        fprintf(stderr, "Failed to allocate key\n");
+        return 1;
+    }
+    zero((void *)selected[0].key, sizeof(key_pair_t));
+    // Populate with test pubkey (33 bytes)
+    hex_to_bytes("03a39f2f31c9b0eb7eb99623b781fc3a105c6062a62a126015a9653b1d1342216a", selected[0].key->key_pub_compressed, PUBKEY_LENGTH);
+
+    // Populate txid (reverse the hex from sample)
+    // Sample TxID hex: f5ab6a10237e6d002133b93162f0ae22f1646d6a0fa6e77e6d341dffac6b0df1
+    // Reversed for standard TxID: d10f6bacff1d34 6d7ee7a60f6a6d64f122ae0f6291b3313321006d7e23106aabf5 (parse properly)
+    // For test, use a known TxID
+    strncpy(selected[0].txid, "f10d6bacff1d346d7ee7a60f6a6d64f122aef06231b93321006d7e23106aabf5", 65);
+    int num_selected = 1;	
+	if (sign_transaction(raw_tx_hex, selected, num_selected) != 0) {
 		fprintf(stderr, "construct_preimage() failure\n");
 		return 1;
 	}
+free(selected);
 	return 0;
 }
 
@@ -402,7 +430,7 @@ int main() {
 	//failures += run_mnemonic_recovery_test();
 	//failures += run_address_generation_test();
 	//failures += run_bech32_decoder();
-	failures += run_construct_preimage();
+	failures += run_sign_transaction_test();
     	printf("Total failures: %d\n", failures);
     	return failures > 0 ? 1 : 0;
 }

@@ -199,6 +199,29 @@ static uint32_t bech32_polymod(const uint8_t *values, size_t len) {
     return chk;
 }
 
+int key_to_pubkeyhash(key_pair_t *key, uint8_t *pubkeyhash) {
+	if (!key) {
+		fprintf(stderr, "Invalid input\n");
+		return 1;
+	}
+	// SHA256 of compressed public key
+    	uint8_t sha256_hash[32];
+    	gcry_md_hd_t hd;
+    	gcry_md_open(&hd, GCRY_MD_SHA256, 0);
+    	gcry_md_write(hd, key->key_pub_compressed, PUBKEY_LENGTH);
+    	gcry_md_final(hd);
+    	memcpy(sha256_hash, gcry_md_read(hd, GCRY_MD_SHA256), 32);
+    	gcry_md_close(hd);
+    	// RIPEMD160 of SHA256 hash
+    	gcry_md_open(&hd, GCRY_MD_RMD160, 0);
+    	gcry_md_write(hd, sha256_hash, 32);
+    	gcry_md_final(hd);
+    	memcpy(pubkeyhash, gcry_md_read(hd, GCRY_MD_RMD160), 20);
+    	gcry_md_close(hd);
+    	return 0;
+}
+
+
 int pubkeyhash_to_address(const uint8_t *pub_key_hash, size_t pub_key_hash_len, char *address, size_t address_len) {
 	uint8_t program_values[BECH32_VALUES_MAX];
 	size_t program_values_len;

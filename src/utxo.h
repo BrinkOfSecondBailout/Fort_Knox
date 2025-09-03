@@ -23,7 +23,7 @@ long long get_utxos(key_pair_t *, utxo_t**, int *, uint32_t, time_t *);
 int select_coins(utxo_t *, int, long long, long long, utxo_t **, int *, long long *);
 int address_to_scriptpubkey(const char *, uint8_t *, size_t *);
 int build_transaction(const char*, long long, utxo_t **, int, key_pair_t *, long long, char *);
-int construct_preimage(char *);
+int construct_preimage(uint8_t *, size_t, utxo_t *, int, uint8_t *);
 int sign_transaction(char *, utxo_t *, int);
 int broadcast_transaction(const char *raw_tx_hex, time_t *);
 
