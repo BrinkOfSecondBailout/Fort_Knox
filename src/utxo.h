@@ -14,7 +14,7 @@ typedef struct {
 	uint32_t vout; // Output index of input in the transaction
 	long long amount;
 	char address[ADDRESS_MAX_LEN];
-	key_pair_t *key; // Corresponding private key for signing
+	key_pair_t *key; // Corresponding key for signing
 } utxo_t;
 
 int estimated_transaction_size(int, int);

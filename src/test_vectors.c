@@ -408,7 +408,7 @@ int run_sign_transaction_test() {
     zero((void *)selected[0].key, sizeof(key_pair_t));
     // Populate with test pubkey (33 bytes)
     hex_to_bytes("03a39f2f31c9b0eb7eb99623b781fc3a105c6062a62a126015a9653b1d1342216a", selected[0].key->key_pub_compressed, PUBKEY_LENGTH);
-
+    hex_to_bytes("2a74d6937281bd8aeaba6910a885f9551bf003340387e7b1fd222ddbcf197b08", selected[0].key->key_priv, PRIVKEY_LENGTH);
     // Populate txid (reverse the hex from sample)
     // Sample TxID hex: f5ab6a10237e6d002133b93162f0ae22f1646d6a0fa6e77e6d341dffac6b0df1
     // Reversed for standard TxID: d10f6bacff1d34 6d7ee7a60f6a6d64f122ae0f6291b3313321006d7e23106aabf5 (parse properly)

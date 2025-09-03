@@ -19,6 +19,7 @@
 #define GAP_LIMIT 20
 #define ADDRESS_MAX_LEN 100
 #define BECH32_VALUES_MAX 100
+
 typedef struct key_pair key_pair_t;
 
 struct key_pair {

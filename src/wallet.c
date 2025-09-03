@@ -547,11 +547,9 @@ int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child
 
 	// The calculation for private key (child = parent priv + IL mod n)
     	gcry_mpi_addm(child_priv_mpi, parent_priv_mpi, il_mpi, n_mpi);
-
     	gcry_mpi_release(parent_priv_mpi);
     	gcry_mpi_release(il_mpi);
     	gcry_mpi_release(n_mpi);
-
 	// Generate child private key
     	size_t written;
 	if (gcry_mpi_print(GCRYMPI_FMT_USG, child->key_priv, PRIVKEY_LENGTH, &written, child_priv_mpi) != 0) {
@@ -559,7 +557,6 @@ int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child
         	return 1;
     	}
     	gcry_mpi_release(child_priv_mpi);
-
     	// Generate child public key
     	if (generate_public_key(child->key_priv, child->key_pub_compressed) != 0) {
 		fprintf(stderr, "Error generating public key for child\n");

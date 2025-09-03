@@ -312,7 +312,6 @@ long long get_utxos(key_pair_t *master_key, utxo_t **utxos, int *num_utxos, uint
 			}
 			child_keys[addr_count] = child_key;
 			addr_count++;
-			zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
 		}
 		zero_and_gcry_free((void *)change_key, sizeof(key_pair_t));
 	}
@@ -456,8 +455,6 @@ int address_to_scriptpubkey(const char *address, uint8_t *script, size_t *script
 		fprintf(stderr, "Failed to decode Bech32 address\n");
 		return -1;
 	}
-//print_bytes_as_hex("Program", program, program_len);
-//printf("Program Len: %zu\n", program_len);
 	if (program[0] != 0 || program_len != 21) {
 		fprintf(stderr, "Only P2WPKH (version 0, 20-byte hash) supported\n");
 		return -1;
@@ -467,7 +464,6 @@ int address_to_scriptpubkey(const char *address, uint8_t *script, size_t *script
 	script[1] = 0x14;
 	memcpy(script + 2, program + 1, 20);
 	*script_len = 22;
-print_bytes_as_hex("SPK", script, *script_len);
 	return 0;
 }
 
@@ -826,12 +822,12 @@ print_bytes_as_hex("Public key", pubkey, PUBKEY_LENGTH);
 	// Sign with private key
 	gcry_sexp_t priv_sexp, data_sexp, sig_sexp;
 	gcry_error_t err;
-	err = gcry_sexp_build(&priv_sexp, NULL, "(private-key (ecc (curve SecP256k1) (d %b)))", PRIVKEY_LENGTH, privkey);
+	err = gcry_sexp_build(&priv_sexp, NULL, "(private-key (ecc (curve secp256k1) (d %b)))", PRIVKEY_LENGTH, privkey);
 	if (err) {
 		fprintf(stderr, "Failed to build priv_sexp: %s\n", gcry_strerror(err));
 		return 1;
 	}
-	err = gcry_sexp_build(&data_sexp, NULL, "(data (flags raw) (hash algo sha256) (value %b))", 32, sighash);
+	err = gcry_sexp_build(&data_sexp, NULL, "(data (flags raw) (hash-algo sha256) (value %b))", 32, sighash);
 	if (err) {
 		gcry_sexp_release(priv_sexp);
 		fprintf(stderr, "Failed to build data_sexp: %s\n", gcry_strerror(err));
@@ -920,7 +916,7 @@ int sign_transaction(char *raw_tx_hex, utxo_t *selected, int num_selected) {
 	for (int i = 0; i < num_selected; i++) {
 		uint8_t witness[108];
 		size_t witness_len = 0;
-		if (sign_preimage_hash(selected[i].key->key_priv, sighash, witness, &witness_len, selected[i].key->key_pub_compressed) != 0) {
+		if (sign_preimage_hash(sighash, selected[i].key->key_priv, witness, &witness_len, selected[i].key->key_pub_compressed) != 0) {
 			fprintf(stderr, "Failure to sign preimage hash\n");
 			return 1;
 		}
