@@ -706,7 +706,7 @@ int32 send_handle(User *user) {
 			fprintf(stderr, "Invalid amount, must be more than 0 and less than your total balance.\n");
 			continue;
 		} else {
-			printf("Got it! Sending %lld...\n", amount);
+			printf("Got it! Sending %lld sats/%lld available...\n", amount, total_balance);
 			break;
 		}
 	}
@@ -816,12 +816,31 @@ int32 send_handle(User *user) {
 		account->used_indexes_count++;
 	}	
 	char *raw_tx_hex = NULL;
-	result = build_transaction(recipient, amount, &selected, num_selected, change_back_key, fee, raw_tx_hex);
+	result = build_transaction(recipient, amount, &selected, num_selected, change_back_key, fee, &raw_tx_hex);
+	if (result != 0) {
+		fprintf(stderr, "Failure building transaction\n");
+		for (int i = 0; i < num_utxos; i++) gcry_free(utxos[i].key);
+		if (num_selected > 0) gcry_free(selected);
+		gcry_free(change_back_key);
+		gcry_free(utxos);
+		return 1;
+	}
+	printf("Successfully built transaction data\n");
+	result = sign_transaction(&raw_tx_hex, &selected, num_selected);
+	if (result != 0) {
+		fprintf(stderr, "Failure signing transaction\n");
+		for (int i = 0; i < num_utxos; i++) gcry_free(utxos[i].key);
+		if (num_selected > 0) gcry_free(selected);
+		gcry_free(change_back_key);
+		gcry_free(utxos);
+		return 1;
+	}
+	printf("Successfully signed transaction data\n");
+/*	result = broadcast_transaction();	
+	if (result != 0) {
 
-//	sign_transaction();
-//	broadcast_transaction();	
-		
-		
+	}
+*/		
 	return 0;
 }
 
