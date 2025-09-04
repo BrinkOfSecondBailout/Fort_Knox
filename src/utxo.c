@@ -13,6 +13,7 @@ int estimated_transaction_size(int num_inputs, int num_outputs) {
 }
 
 int get_fee_rate(long long *regular_rate, long long *priority_rate, time_t *last_request) {
+	printf("Finding miners fee rate...\n");
 	CURL *curl = curl_easy_init();
 	if (!curl) return -1;
 	char url[] = "https://mempool.space/api/v1/fees/recommended";
@@ -61,6 +62,7 @@ int get_fee_rate(long long *regular_rate, long long *priority_rate, time_t *last
 }
 
 long long query_utxos(char **addresses, int num_addresses, utxo_t **utxos, int *num_utxos, key_pair_t **child_keys, time_t *last_request) {
+	printf("Querying UTXOs...\n");
 	long long total_balance = 0;
 	int result;
 	if (*addresses[0] == '\0' || num_addresses == 0) {
@@ -217,6 +219,7 @@ long long get_utxos(key_pair_t *master_key, utxo_t **utxos, int *num_utxos, uint
 		fprintf(stderr, "Invalid inputs\n");
 		return -1;
 	}
+	printf("Gathering UTXO's for account %u...\n", account_index);
 	char **addresses = NULL;
 	addresses = gcry_malloc_secure(GAP_LIMIT * 2 * sizeof(char *));
 	key_pair_t **child_keys = NULL;
@@ -333,6 +336,7 @@ int select_coins(utxo_t *utxos, int num_utxos, long long amount, long long fee, 
 		fprintf(stderr, "Invalid input\n");
 		return 1;
 	}
+	printf("Preparing the most optimal UTXO's set for your transaction...\n");
 	long long total_available = 0;
 	for (int i = 0; i < num_utxos; i++) {
 		if (utxos[i].amount < 0) {
@@ -472,6 +476,7 @@ int build_transaction(const char *recipient, long long amount, utxo_t **selected
 		fprintf(stderr, "Invalid inputs\n");
 		return 1;
 	}
+	printf("Building your transaction data...\n");
 	// Validate funds
 	long long input_sum = 0;
 	for (int i = 0; i < num_selected; i++) {
@@ -542,7 +547,6 @@ printf("Vout (input): %d\n", (*selected)[i].vout);
 	// Recipient output
 	uint8_t script[25];
 	size_t script_len;
-printf("Output SPK\n");
 	if (address_to_scriptpubkey(recipient, script, &script_len) != 0) {
 		free(buffer);
 		fprintf(stderr, "Failed to convert recipient address\n");
@@ -559,7 +563,6 @@ printf("Output SPK\n");
 	pos += script_len;
 	// Change output
 	if (change > 0) {
-printf("Change: %lld\n", change);
 		if (!change_back_key) {
 			free(buffer);
 			fprintf(stderr, "Change required but no change key provided\n");
@@ -571,7 +574,6 @@ printf("Change: %lld\n", change);
 			fprintf(stderr, "Failed to convert change address\n");
 			return 1;
 		}
-printf("Change SPK\n");
 		if (address_to_scriptpubkey(change_address, script, &script_len) != 0) {
 			free(buffer);
 			fprintf(stderr, "Failed to convert change scriptpubkey\n");
@@ -656,7 +658,6 @@ int construct_preimage(uint8_t *tx_data, size_t tx_len, utxo_t *selected, int nu
 	// Input count (varint, assuming small, 1 byte)
 	int num_inputs = tx_data[pos];
 	pos += 1;
-printf("Num_inputs: %d\n", num_inputs);
 	// Parse inputs and serialize outpoints + sequences
 	uint8_t *outpoints = malloc(num_inputs * 36); // 32 txid + 4 vout
 	uint8_t *sequences = malloc(num_inputs * 4);
@@ -686,17 +687,14 @@ printf("Num_inputs: %d\n", num_inputs);
 	// Hash outpoints
 	uint8_t hash_prevouts[32];
 	double_sha256(outpoints, num_inputs * 36, hash_prevouts);
-print_bytes_as_hex("Hash Prevouts", hash_prevouts, 32);
 	free(outpoints);
 	// Hash sequences
 	uint8_t hash_sequence[32];
 	double_sha256(sequences, num_inputs * 4, hash_sequence);
-print_bytes_as_hex("Hash Sequence", hash_sequence, 32);
 	free(sequences);
 	// Output count (varint, assume small, 1 byte)
 	int num_outputs = tx_data[pos];
 	pos += 1;
-printf("Num_outputs: %d\n", num_outputs);
 	// Parse outputs and serialize
 	uint8_t *outputs_serialized = malloc(num_outputs * (8 + 1 + 22)); // Amount (8 bytes) and script ~22 for P2WPKH
 	if (!outputs_serialized) {
@@ -720,20 +718,16 @@ printf("Num_outputs: %d\n", num_outputs);
 		outputs_pos += script_len;
 		pos += script_len;
 	}
-print_bytes_as_hex("Outputs Serialized", outputs_serialized, 62);
 	uint8_t hash_outputs[32];
 	double_sha256(outputs_serialized, outputs_pos, hash_outputs);
-print_bytes_as_hex("Hash outputs", hash_outputs, 32);
 	free(outputs_serialized);
 	// Locktime (4 bytes)
 	uint8_t locktime[4];
 	memcpy(locktime, tx_data + pos, 4);
 	pos += 4;
-print_bytes_as_hex("Lock time", locktime, 4);
 	// Sighash type (4 bytes)
 	uint8_t sighash_type [4];
 	encode_uint32_le(SIGHASH_ALL, sighash_type);
-print_bytes_as_hex("Sighash type", sighash_type, 4);
 	// Prepare preimage = 
 	// version + hash256(inputs) + hash256(sequences) + (num_inputs * (input(txid + vout)) + scriptcode + amount + sequence) + hash256(outputs) + locktime	
 	size_t preimage_len = 4 + 32 + 32 + ((36 + 25 + 8 + 4) * num_inputs) + 32 + 4; 
@@ -753,7 +747,6 @@ print_bytes_as_hex("Sighash type", sighash_type, 4);
 	// HashSequence
 	memcpy(preimage + preimage_pos, hash_sequence, 32);
 	preimage_pos += 32;
-print_bytes_as_hex("After Vers, HashPrevouts, HashSequence", preimage, preimage_pos);
 	for (int i = 0; i < num_inputs; i++) {
 		// Outpoint (txid + vout per input)
 		uint8_t outpoint[36];
@@ -761,7 +754,6 @@ print_bytes_as_hex("After Vers, HashPrevouts, HashSequence", preimage, preimage_
 		memcpy(outpoint + 32, tx_data + 38, 4); // vout
 		memcpy(preimage + preimage_pos, outpoint, 36);
 		preimage_pos += 36;
-print_bytes_as_hex("After Outpoint (txid and vout)", preimage, preimage_pos);
 		// ScriptCode (P2PKH format: 1976a914<hash>88ac)
 		uint8_t pubkeyhash[20];
 		if (i < num_selected) {
@@ -785,7 +777,6 @@ print_bytes_as_hex("After Outpoint (txid and vout)", preimage, preimage_pos);
 		hex_to_bytes(scriptcode, scriptcode_bytes, 25);
 		memcpy(preimage + preimage_pos, scriptcode_bytes, 25);
 		preimage_pos += 25;
-print_bytes_as_hex("After Scriptcode bytes", preimage, preimage_pos);
 		// Amount
 		uint8_t amount[8];
 		encode_uint64_le((selected)[i].amount, amount);
@@ -794,7 +785,6 @@ print_bytes_as_hex("After Scriptcode bytes", preimage, preimage_pos);
 		// Sequence
 		memcpy(preimage + preimage_pos, tx_data + 43, 4); 
 		preimage_pos += 4;
-print_bytes_as_hex("After amount and sequence", preimage, preimage_pos);
 	}
 	// HashOutputs
 	memcpy(preimage + preimage_pos, hash_outputs, 32);
@@ -802,7 +792,7 @@ print_bytes_as_hex("After amount and sequence", preimage, preimage_pos);
 	// Locktime
 	memcpy(preimage + preimage_pos, locktime, 4);
 	preimage_pos += 4;
-print_bytes_as_hex("After Hashoutputs and Locktime", preimage, preimage_pos);
+print_bytes_as_hex("Final preimage", preimage, preimage_pos);
 	// Sighash type
 	double_sha256(preimage, preimage_pos, sighash);
 print_bytes_as_hex("Sighash", sighash, 32);
@@ -815,8 +805,6 @@ int sign_preimage_hash(uint8_t *sighash, uint8_t *privkey, uint8_t *witness, siz
 		fprintf(stderr, "Input errors\n");
 		return 1;
 	}
-print_bytes_as_hex("Private key", privkey, PRIVKEY_LENGTH);
-print_bytes_as_hex("Public key", pubkey, PUBKEY_LENGTH);
 	uint8_t encoded_sig[72];
 	size_t sig_len = 0;
 	// Sign with private key
@@ -854,10 +842,8 @@ print_bytes_as_hex("Public key", pubkey, PUBKEY_LENGTH);
 	size_t r_len, s_len;
 	const void *r_data = gcry_sexp_nth_data(r, 1, &r_len);
 	const void *s_data = gcry_sexp_nth_data(s, 1, &s_len);
-print_bytes_as_hex("Signature R", r_data, r_len);
-print_bytes_as_hex("Signature S", s_data, s_len);
-printf("r_len: %zu\n", r_len);
-printf("s_len: %zu\n", s_len);
+print_bytes_as_hex("R", r_data, r_len);
+print_bytes_as_hex("S", s_data, s_len);
 	// DER encode the signature
 	encoded_sig[0] = 0x30;
 	encoded_sig[1] = r_len + s_len + 4;
@@ -868,9 +854,9 @@ printf("s_len: %zu\n", s_len);
 	encoded_sig[5 + r_len] = s_len;
 	memcpy(encoded_sig + 6 + r_len, s_data, s_len);
 	// Append signature hash type
-	encoded_sig[6 + s_len] = 0x01;
+	encoded_sig[6 + r_len + s_len] = 0x01;
 	sig_len = 7 + r_len + s_len;
-	encoded_sig[sig_len] = '\0';
+	//encoded_sig[sig_len] = '\0';
 print_bytes_as_hex("Serialized DER Encoded Signature (with Sighash type)", encoded_sig, sig_len);
 	gcry_sexp_release(priv_sexp);
 	gcry_sexp_release(sig_sexp);
@@ -892,6 +878,7 @@ int sign_transaction(char *raw_tx_hex, utxo_t *selected, int num_selected) {
 		fprintf(stderr, "Invalid inputs\n");
 		return 1;
 	}
+	printf("Signing transaction...\n");
 	size_t tx_len = strlen(raw_tx_hex) / 2;
 	uint8_t *tx_data = malloc(tx_len);
 	if (!tx_data) {
@@ -904,9 +891,13 @@ int sign_transaction(char *raw_tx_hex, utxo_t *selected, int num_selected) {
 		fprintf(stderr, "construct_preimage() failure\n");	
 		return 1;
 	}
+	// Extract locktime
+	uint8_t locktime[4];
+	memcpy(locktime, tx_data + tx_len - 4, 4);
 	// Append witnesses
-	size_t witness_pos = tx_len; // Append at end (after locktime)
-	size_t new_tx_len = tx_len + (num_selected * 108); // Approx. witness size
+	size_t witness_pos = tx_len - 4; // Append at end (before locktime)
+	// Reallocate to larger array for witness(es)
+	size_t new_tx_len = tx_len + (num_selected * 107); // Approx. witness size
 	uint8_t *new_tx_data = (uint8_t *)realloc(tx_data, new_tx_len);
 	if (!new_tx_data) {
 		free(tx_data);
@@ -914,7 +905,7 @@ int sign_transaction(char *raw_tx_hex, utxo_t *selected, int num_selected) {
 		return 1;
 	}
 	for (int i = 0; i < num_selected; i++) {
-		uint8_t witness[108];
+		uint8_t witness[107];
 		size_t witness_len = 0;
 		if (sign_preimage_hash(sighash, selected[i].key->key_priv, witness, &witness_len, selected[i].key->key_pub_compressed) != 0) {
 			fprintf(stderr, "Failure to sign preimage hash\n");
@@ -924,6 +915,10 @@ int sign_transaction(char *raw_tx_hex, utxo_t *selected, int num_selected) {
 		memcpy(new_tx_data + witness_pos, witness, witness_len);
 		witness_pos += witness_len;
 	}
+	// Insert locktime at the end after witness
+	memcpy(new_tx_data + witness_pos, locktime, 4);
+print_bytes_as_hex("Final Signed (Bytes)", new_tx_data, new_tx_len);
+	// Convert back to hex
     	char *new_raw_tx_hex = malloc(new_tx_len * 2);
     	if (!new_raw_tx_hex) {
 		free(new_tx_data);
@@ -932,7 +927,7 @@ int sign_transaction(char *raw_tx_hex, utxo_t *selected, int num_selected) {
     	}
     	bytes_to_hex(new_tx_data, new_tx_len, new_raw_tx_hex, new_tx_len * 2);
     	raw_tx_hex = new_raw_tx_hex;
-printf("FINAL:\n%s\n", raw_tx_hex);
+printf("FINAL SIGNED HEX:\n%s\n", raw_tx_hex);
 	free(new_tx_data);
     	return 0;
 }
@@ -940,6 +935,7 @@ printf("FINAL:\n%s\n", raw_tx_hex);
 int broadcast_transaction(const char *raw_tx_hex, time_t *last_request) {
 	CURL *curl = curl_easy_init();
 	if (!curl) return -1;
+	printf("Broadcasting your transaction...\n");
 	char url[] = "https://blockchain.info/pushtx";
 	char post_data[2048];
 	snprintf(post_data, sizeof(post_data), "tx=%s", raw_tx_hex);

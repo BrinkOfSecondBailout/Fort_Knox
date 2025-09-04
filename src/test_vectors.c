@@ -416,10 +416,11 @@ int run_sign_transaction_test() {
     strncpy(selected[0].txid, "f10d6bacff1d346d7ee7a60f6a6d64f122aef06231b93321006d7e23106aabf5", 65);
     int num_selected = 1;	
 	if (sign_transaction(raw_tx_hex, selected, num_selected) != 0) {
-		fprintf(stderr, "construct_preimage() failure\n");
-		return 1;
+		fprintf(stderr, "Failure with sign_transaction\n");
+		free(selected);
+		return 1;		
 	}
-free(selected);
+	free(selected);
 	return 0;
 }
 
