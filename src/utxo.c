@@ -730,7 +730,7 @@ int construct_preimage(uint8_t *tx_data, size_t tx_len, utxo_t *selected, int nu
 	encode_uint32_le(SIGHASH_ALL, sighash_type);
 	// Prepare preimage = 
 	// version + hash256(inputs) + hash256(sequences) + (num_inputs * (input(txid + vout)) + scriptcode + amount + sequence) + hash256(outputs) + locktime	
-	size_t preimage_len = 4 + 32 + 32 + ((36 + 25 + 8 + 4) * num_inputs) + 32 + 4; 
+	size_t preimage_len = 4 + 32 + 32 + ((36 + 25 + 8 + 4) * num_inputs) + 32 + 4 + 4; 
 	uint8_t *preimage = malloc(preimage_len);
 	if (!preimage) {
 		free(tx_data);
@@ -792,6 +792,9 @@ int construct_preimage(uint8_t *tx_data, size_t tx_len, utxo_t *selected, int nu
 	// Locktime
 	memcpy(preimage + preimage_pos, locktime, 4);
 	preimage_pos += 4;
+	// Add sig hash type at the end
+	memcpy(preimage + preimage_pos, sighash_type, 4);
+	preimage_pos += 4;
 print_bytes_as_hex("Final preimage", preimage, preimage_pos);
 	// Sighash type
 	double_sha256(preimage, preimage_pos, sighash);
@@ -844,19 +847,22 @@ int sign_preimage_hash(uint8_t *sighash, uint8_t *privkey, uint8_t *witness, siz
 	const void *s_data = gcry_sexp_nth_data(s, 1, &s_len);
 print_bytes_as_hex("R", r_data, r_len);
 print_bytes_as_hex("S", s_data, s_len);
+print_bytes_as_hex("Pubkey", pubkey, PUBKEY_LENGTH);
 	// DER encode the signature
 	encoded_sig[0] = 0x30;
 	encoded_sig[1] = r_len + s_len + 4;
 	encoded_sig[2] = 0x02;
 	encoded_sig[3] = r_len;
-	memcpy(encoded_sig + 4, r_data, r_len);
+	memcpy(4 + encoded_sig, r_data, r_len);
 	encoded_sig[4 + r_len] = 0x02;
 	encoded_sig[5 + r_len] = s_len;
-	memcpy(encoded_sig + 6 + r_len, s_data, s_len);
+	memcpy(6 + encoded_sig + r_len, s_data, s_len);
 	// Append signature hash type
 	encoded_sig[6 + r_len + s_len] = 0x01;
+	// Calculate total encoded sig len
 	sig_len = 7 + r_len + s_len;
 	//encoded_sig[sig_len] = '\0';
+printf("SIG_LEN: %ld\n", sig_len);
 print_bytes_as_hex("Serialized DER Encoded Signature (with Sighash type)", encoded_sig, sig_len);
 	gcry_sexp_release(priv_sexp);
 	gcry_sexp_release(sig_sexp);
@@ -865,9 +871,10 @@ print_bytes_as_hex("Serialized DER Encoded Signature (with Sighash type)", encod
 	// Construct full witness
 	witness[0] = 0x02;
 	witness[1] = sig_len;
-	memcpy(witness + 3, encoded_sig, sig_len);
-	witness[3 + sig_len] = PUBKEY_LENGTH;
-	memcpy(witness + 4 + sig_len, pubkey, PUBKEY_LENGTH);
+
+	memcpy(2 + witness, encoded_sig, sig_len);
+	witness[2 + sig_len] = PUBKEY_LENGTH;
+	memcpy(3 + witness + sig_len, pubkey, PUBKEY_LENGTH);
 	*witness_len = 3 + sig_len + PUBKEY_LENGTH;
 print_bytes_as_hex("Full serialized witness", witness, *witness_len);	
 	return 0;
@@ -897,7 +904,7 @@ int sign_transaction(char *raw_tx_hex, utxo_t *selected, int num_selected) {
 	// Append witnesses
 	size_t witness_pos = tx_len - 4; // Append at end (before locktime)
 	// Reallocate to larger array for witness(es)
-	size_t new_tx_len = tx_len + (num_selected * 107); // Approx. witness size
+	size_t new_tx_len = tx_len + (num_selected * 108); // Approx. witness size
 	uint8_t *new_tx_data = (uint8_t *)realloc(tx_data, new_tx_len);
 	if (!new_tx_data) {
 		free(tx_data);
@@ -905,7 +912,7 @@ int sign_transaction(char *raw_tx_hex, utxo_t *selected, int num_selected) {
 		return 1;
 	}
 	for (int i = 0; i < num_selected; i++) {
-		uint8_t witness[107];
+		uint8_t witness[108];
 		size_t witness_len = 0;
 		if (sign_preimage_hash(sighash, selected[i].key->key_priv, witness, &witness_len, selected[i].key->key_pub_compressed) != 0) {
 			fprintf(stderr, "Failure to sign preimage hash\n");
@@ -917,7 +924,6 @@ int sign_transaction(char *raw_tx_hex, utxo_t *selected, int num_selected) {
 	}
 	// Insert locktime at the end after witness
 	memcpy(new_tx_data + witness_pos, locktime, 4);
-print_bytes_as_hex("Final Signed (Bytes)", new_tx_data, new_tx_len);
 	// Convert back to hex
     	char *new_raw_tx_hex = malloc(new_tx_len * 2);
     	if (!new_raw_tx_hex) {
