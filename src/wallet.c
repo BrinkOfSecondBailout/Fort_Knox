@@ -6,6 +6,7 @@
 #include "test_vectors.h"
 #include "wallet.h"
 #include "hash.h"
+#include "query.h"
 
 int key_to_pubkeyhash(key_pair_t *key, uint8_t *pubkeyhash) {
 	if (!key) {
@@ -28,7 +29,6 @@ int key_to_pubkeyhash(key_pair_t *key, uint8_t *pubkeyhash) {
     	gcry_md_close(hd);
     	return 0;
 }
-
 
 int pubkeyhash_to_address(const uint8_t *pub_key_hash, size_t pub_key_hash_len, char *address, size_t address_len) {
 	uint8_t program_values[BECH32_VALUES_MAX];
@@ -456,74 +456,6 @@ int derive_from_public_to_account(const key_pair_t *pub_key, uint32_t account_in
 	return 0;
 } 
 
-// Matching the parameters prototype of how curl expects their callback function
-size_t curl_write_callback_func(void *contents, size_t size, size_t nmemb, void *userdata) {
-	// Must match and return this size (bytes) for 'success'
-	size_t realsize = size * nmemb;
-	curl_buffer_t *mem = (curl_buffer_t *)userdata;
-	// Reallocate memory to accomodate new chunk of data being transferred
-	char *ptr = realloc(mem->data, mem->size + realsize + 1);
-	if (!ptr) return 0;
-	mem->data = ptr;
-	// Add new chunk of data to the next empty byte slot memory
-	memcpy(&(mem->data[mem->size]), contents, realsize);
-	// Update size of data buffer so far and null terminate it
-	mem->size += realsize;
-	mem->data[mem->size] = 0;
-	return realsize;
-}
-
-double get_bitcoin_price(time_t *last_request) {
-	CURL *curl = curl_easy_init();
-	if (!curl) {
-		fprintf(stderr, "Failed to initialize CURL\n");
-		return -1.0;
-	}
-	char url[] = "https://blockchain.info/ticker";
-	curl_buffer_t buffer = {0};
-	curl_easy_setopt(curl, CURLOPT_URL, url);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_callback_func);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buffer);
-
-	time_t now = time(NULL);
-	if (*last_request != 0 && difftime(now, *last_request) < SECS_PER_REQUEST) {
-		int sleep_time = SECS_PER_REQUEST - (int)difftime(now, *last_request);
-		printf("Rate limit: 1 request per 20 seconds...\nWaiting %d seconds...\n", sleep_time);
-		sleep(sleep_time);
-	}
-	CURLcode res = curl_easy_perform(curl);
-	*last_request = time(NULL);
-	curl_easy_cleanup(curl);
-	if (res != CURLE_OK) {
-		fprintf(stderr, "CURL failed: %s\n", curl_easy_strerror(res));
-		free(buffer.data);
-		return -1.0;
-	}
-	json_error_t error;
-    	json_t *root = json_loads(buffer.data, 0, &error);
-    	free(buffer.data);
-    	if (!root) {
-        	fprintf(stderr, "JSON parse error: %s\n", error.text);
-        	return -1.0;
-    	}
-    	// Extract USD price (last)
-    	json_t *usd = json_object_get(root, "USD");
-    	if (!json_is_object(usd)) {
-        	fprintf(stderr, "Failed to find USD object in JSON\n");
-        	json_decref(root);
-        	return -1.0;
-    	}
-    	json_t *last = json_object_get(usd, "last");
-    	if (!json_is_number(last)) {
-        	fprintf(stderr, "Failed to find last price in USD object\n");
-        	json_decref(root);
-        	return -1.0;
-    	}
-    	double price = json_number_value(last);
-    	json_decref(root);
-    	return price;
-}
-
 int parse_json_for_any_transaction(char *json_data) {
 	json_error_t error;
 	json_t *root = json_loads(json_data, 0, &error);
@@ -572,43 +504,6 @@ long long parse_json_for_total_balance(char *json_data) {
 	return total_balance;
 }
 
-int init_curl_and_addresses(const char **addresses, int num_addresses, curl_buffer_t *buffer, time_t *last_request) {
-	// Set a curl handle for the data transfer
-	CURL *curl = curl_easy_init();
-	if (!curl) return -1;
-	// Build pipe-separated address list for API
-	char addr_list[1024 * 2] = {0};
-
-	for (int i = 0; i < num_addresses; i++) {
-		strncat(addr_list, addresses[i], sizeof(addr_list) - strlen(addr_list) - 2);
-		if (i < num_addresses - 1) strncat(addr_list, "|", sizeof(addr_list) - strlen(addr_list) - 2);
-	}
-	char url[2048];
-	snprintf(url, sizeof(url), "https://blockchain.info/multiaddr?active=%s", addr_list);
-	
-	// Set the behaviors for the curl handle
-	curl_easy_setopt(curl, CURLOPT_URL, url);
-    	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_callback_func);
-    	curl_easy_setopt(curl, CURLOPT_WRITEDATA, buffer);
-
-	time_t now = time(NULL);
-	if (*last_request != 0 && difftime(now, *last_request) < SECS_PER_REQUEST) {
-		int sleep_time = SECS_PER_REQUEST - (int)difftime(now, *last_request);
-		printf("Rate limit: 1 request per 20 seconds...\nWaiting %d seconds...\n", sleep_time);
-		sleep(sleep_time);
-	}
-	// Perform blocking network transfer
-    	CURLcode res = curl_easy_perform(curl);
-	*last_request = time(NULL);
-    	curl_easy_cleanup(curl);
-
-    	if (res != CURLE_OK) {
-		fprintf(stderr, "CURL failed: %s\n", curl_easy_strerror(res));
-        	free(buffer->data);
-        	return -1;
-    	}
-	return 0;
-}
 // Get total balance for a list of addresses (in satoshis)
 long long get_balance(const char **addresses, int num_addresses, time_t *last_request) {
 	printf("Querying the blockchain for 20 Bech32-P2WPKH addresses (external and internal chain) associated with this wallet account...\n");

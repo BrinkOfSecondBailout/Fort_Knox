@@ -36,11 +36,6 @@ typedef struct {
 	uint32_t used_indexes_count;
 } account_t;
 
-typedef struct {
-	char *data;
-	size_t size;
-} curl_buffer_t;
-
 int key_to_pubkeyhash(key_pair_t *key, uint8_t *pubkeyhash);
 int pubkeyhash_to_address(const uint8_t *, size_t, char *, size_t);
 int pubkey_to_address(const uint8_t *, size_t, char *, size_t);

@@ -4,63 +4,7 @@
 #include "utxo.h"
 #include "crypt.h"
 #include "hash.h"
-
-int estimated_transaction_size(int num_inputs, int num_outputs) {
-	// Non-witness data
-	int non_witness = 4 + 2 + 1 + num_inputs * 40 + 1 + num_outputs * 33 + 4;
-	// Witness data (discounted by 1/4 for SegWit)
-	double witness = num_inputs * 107.0 / 4.0;
-	return (int)ceil(non_witness + witness);
-}
-
-int get_fee_rate(long long *regular_rate, long long *priority_rate, time_t *last_request) {
-	printf("Finding miners fee rate...\n");
-	CURL *curl = curl_easy_init();
-	if (!curl) return -1;
-	char url[] = "https://mempool.space/api/v1/fees/recommended";
-	curl_buffer_t buffer = {0};
-	curl_easy_setopt(curl, CURLOPT_URL, url);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_callback_func);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buffer);
-	
-	time_t now = time(NULL);
-	if (*last_request != 0 && difftime(now, *last_request) < SECS_PER_REQUEST) {
-		int sleep_time = SECS_PER_REQUEST - (int)difftime(now, *last_request);
-		printf("Rate limit: 1 request per 20 seconds...\nWaiting %d seconds...\n", sleep_time);
-		sleep(sleep_time);
-	}
-	CURLcode res = curl_easy_perform(curl);
-	*last_request = time(NULL);
-	curl_easy_cleanup(curl);
-	if (res != CURLE_OK) {
-		free(buffer.data);
-		fprintf(stderr, "CURL failed: %s\n", curl_easy_strerror(res));
-		return -1;
-	}
-	json_error_t error;
-	json_t *root = json_loads(buffer.data, 0, &error);
-	free(buffer.data);
-	if (!root) {
-		fprintf(stderr, "JSON parse error: %s\n", error.text);
-		return -1;
-	}
-	json_t *priority = json_object_get(root, "fastestFee");
-	if (!json_is_integer(priority)) {
-		fprintf(stderr, "Unable to find priority fee rate in JSON\n");
-		json_decref(root);
-		return -1;
-	}
-	json_t *regular = json_object_get(root, "hourFee");
-	if (!json_is_integer(regular)) {
-		fprintf(stderr, "Unable to find regular fee rate in JSON\n");
-		json_decref(root);
-		return -1;
-	}
-	*regular_rate = (long long)json_integer_value(regular);
-	*priority_rate = (long long)json_integer_value(priority);
-	json_decref(root);
-	return 0;
-}
+#include "query.h"
 
 long long query_utxos(char **addresses, int num_addresses, utxo_t **utxos, int *num_utxos, key_pair_t **child_keys, time_t *last_request) {
 	printf("Querying UTXOs...\n");

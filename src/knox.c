@@ -7,7 +7,7 @@
 #include "mnemonic.h"
 #include "utxo.h"
 #include "hash.h"
-#include "curl/curl.h"
+#include "query.h"
 
 void print_logo() {
 	FILE *logo = fopen("logo.txt", "r");

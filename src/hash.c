@@ -224,7 +224,6 @@ char *base58_encode(const uint8_t *data, size_t data_len) {
 	return result;
 }
 
-
 int bech32_decode(const char *address, uint8_t *program, size_t *program_len) {
 	if (strncmp(address, "bc1q", 4) != 0) {
 		fprintf(stderr, "Expecting bc1q for P2WKPH v0 addresses only\n");
@@ -279,6 +278,7 @@ int encode_varint(uint64_t value, uint8_t *buffer, size_t *len) {
 	}
 	return 0;
 }
+
 // Encode a 32 bit unsigned integer to a 4 byte little endian buffer
 void encode_uint32_le(uint32_t value, uint8_t *buffer) {
 	buffer[0] = value & 0xFF;
@@ -286,6 +286,7 @@ void encode_uint32_le(uint32_t value, uint8_t *buffer) {
 	buffer[2] = (value >> 16) & 0xFF;
 	buffer[3] = (value >> 24) & 0xFF;
 }
+
 // Encode a 64 bit unsigned integer to a 8 byte little endian buffer
 void encode_uint64_le(uint64_t value, uint8_t *buffer) {
 	for (int i = 0; i < 8; i++) {
