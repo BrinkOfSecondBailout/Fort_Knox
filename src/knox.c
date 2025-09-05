@@ -6,6 +6,7 @@
 #include "crypt.h"
 #include "mnemonic.h"
 #include "utxo.h"
+#include "hash.h"
 #include "curl/curl.h"
 
 void print_logo() {
@@ -836,11 +837,16 @@ int32 send_handle(User *user) {
 		return 1;
 	}
 	printf("Successfully signed transaction data\n");
-/*	result = broadcast_transaction();	
+	result = broadcast_transaction(&raw_tx_hex, &user->last_api_request);	
 	if (result != 0) {
-
+		fprintf(stderr, "Failure broadcasting transaction\n");
+		for (int i = 0; i < num_utxos; i++) gcry_free(utxos[i].key);
+		if (num_selected > 0) gcry_free(selected);
+		gcry_free(change_back_key);
+		gcry_free(utxos);
+		return 1;
 	}
-*/		
+		
 	return 0;
 }
 

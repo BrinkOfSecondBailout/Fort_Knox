@@ -41,21 +41,6 @@ typedef struct {
 	size_t size;
 } curl_buffer_t;
 
-void zero(void *, size_t);
-void zero_multiple(void *, ...);
-void zero_and_gcry_free(void *, size_t);
-void zero_and_gcry_free_multiple(size_t, void *, ...);
-void convert_bits(uint8_t *, size_t *, const uint8_t *, size_t, int, int, int);
-int decimal_to_int_le(const char *, size_t, int *);
-int hex_to_int(const char *, size_t, int *);
-void hex_to_bytes(const char *, uint8_t *, size_t);
-void resize_convert_hex_to_bytes(const char *, uint8_t *);
-void print_bits(const char *, const uint8_t*, size_t);
-void print_5bit_groups(const char *, const uint8_t*, size_t);
-void print_bytes_as_hex(const char *, const uint8_t *, size_t);
-int bytes_to_hex(const uint8_t *, size_t, char *, size_t);
-void print_seed_hashed(const uint8_t *, size_t);
-void print_master_priv_key_hashed(const uint8_t *, size_t);
 int key_to_pubkeyhash(key_pair_t *key, uint8_t *pubkeyhash);
 int pubkeyhash_to_address(const uint8_t *, size_t, char *, size_t);
 int pubkey_to_address(const uint8_t *, size_t, char *, size_t);

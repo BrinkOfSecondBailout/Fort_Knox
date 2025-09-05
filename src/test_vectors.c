@@ -5,6 +5,7 @@
 #include "crypt.h"
 #include "utxo.h"
 #include "test_vectors.h"
+#include "hash.h"
 
 // BIP-32 test vectors (from Bitcoin wiki)
 static const bip32_test_vector_t test_vectors[] = {
@@ -415,12 +416,16 @@ int run_sign_transaction_test() {
     // For test, use a known TxID
     strncpy(selected[0].txid, "f10d6bacff1d346d7ee7a60f6a6d64f122aef06231b93321006d7e23106aabf5", 65);
     int num_selected = 1;	
-	if (sign_transaction(raw_tx_hex, selected, num_selected) != 0) {
+	if (sign_transaction(&raw_tx_hex, &selected, num_selected) != 0) {
 		fprintf(stderr, "Failure with sign_transaction\n");
 		free(selected);
 		return 1;		
 	}
+	size_t tx_len = strlen(raw_tx_hex);
+	uint8_t tx_data[tx_len]; 
+	hex_to_bytes(raw_tx_hex, tx_data, strlen(raw_tx_hex));
 	free(selected);
+	free(raw_tx_hex);
 	return 0;
 }
 

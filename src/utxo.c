@@ -3,6 +3,7 @@
 #include <jansson.h>
 #include "utxo.h"
 #include "crypt.h"
+#include "hash.h"
 
 int estimated_transaction_size(int num_inputs, int num_outputs) {
 	// Non-witness data
@@ -374,83 +375,6 @@ int select_coins(utxo_t *utxos, int num_utxos, long long amount, long long fee, 
 	*num_selected = count;
 	return 0;
 }
-// Variable length integers
-int encode_varint(uint64_t value, uint8_t *buffer, size_t *len) {
-	if (value < 0xFD) { // < 253 inputs or outputs
-		buffer[0] = (uint8_t)value;
-		*len = 1;
-	} else if (value <= 0xFFFF) { // 253 to 65535
-		buffer[0] = 0xFD;
-		buffer[1] = value & 0xFF;
-		buffer[2] = (value >> 8) & 0xFF;
-		*len = 3;
-	} else {
-		return 1;
-	}
-	return 0;
-}
-// Encode a 32 bit unsigned integer to a 4 byte little endian buffer
-void encode_uint32_le(uint32_t value, uint8_t *buffer) {
-	buffer[0] = value & 0xFF;
-	buffer[1] = (value >> 8) & 0xFF;
-	buffer[2] = (value >> 16) & 0xFF;
-	buffer[3] = (value >> 24) & 0xFF;
-}
-// Encode a 64 bit unsigned integer to a 8 byte little endian buffer
-void encode_uint64_le(uint64_t value, uint8_t *buffer) {
-	for (int i = 0; i < 8; i++) {
-		buffer[i] = (value >> (i * 8)) & 0xFF;
-	}
-}
-
-static const char *bech32_charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
-
-static int bech32_decode_char(char c) {
-	const char *p = strchr(bech32_charset, tolower(c));
-	if (p) {
-		return p - bech32_charset;
-	}
-	return -1;
-}
-
-int bech32_decode(const char *address, uint8_t *program, size_t *program_len) {
-	if (strncmp(address, "bc1q", 4) != 0) {
-		fprintf(stderr, "Expecting bc1q for P2WKPH v0 addresses only\n");
-		return -1;
-	}
-	size_t len = strlen(address);
-	if (len < 8 || len > 90) {
-		fprintf(stderr, "Address must be between 8 and 90 characters\n");
-		return -1;
-	}
-	const char *hrp = "bc";
-	size_t hrp_len = strlen(hrp);
-	const char *separator = strchr(address, '1');
-	if (separator == NULL || separator - address != hrp_len) {
-		fprintf(stderr, "No separator\n");
-		return -1; // Verify separator is in correct position
-	}
-	// Decode data part
-	uint8_t values[len - hrp_len - 1];
-	size_t values_len = 0;
-	for (const char *p = separator + 1; *p; p++) {
-		int v = bech32_decode_char(*p);
-		if (v < 0) return -1;
-		values[values_len++] = v;
-	}
-	// Verify checksum
-	if (values_len < 6) return -1; // Checksum is 6 chars
-	// Convert to 8 bit bytes
-	uint8_t data[values_len * 5 / 8];
-	size_t data_len;
-	convert_bits(data, &data_len, values + 1, values_len - 6 - 1, 5, 8, 0); // Exclude first byte and exclude checksum
-	if (data_len < 2 || data_len > 40) return -1;
-	// Program: version + data
-	program[0] = 0;
-	memcpy(program + 1, data, data_len);
-	*program_len = data_len + 1;
-	return 0;
-}
 
 int address_to_scriptpubkey(const char *address, uint8_t *script, size_t *script_len) {
 	uint8_t program[42];
@@ -590,13 +514,6 @@ int build_transaction(const char *recipient, long long amount, utxo_t **selected
 		memcpy(buffer + pos, script, script_len);
 		pos += script_len;
 	}
-	// Witness placeholder per input
-/*	for (int i = 0; i < num_selected; i++) {
-		buffer[pos++] = 0x02; // 2 witness stack items(signature + pubkey)
-		buffer[pos++] = 0x00; // Placeholder for signature
-		buffer[pos++] = 0x00; // Placeholder for pubkey
-	}
-*/
 	// Locktime
 	encode_uint32_le(0, buffer + pos);
 	pos += 4;
@@ -617,22 +534,6 @@ int build_transaction(const char *recipient, long long amount, utxo_t **selected
 	//printf("Raw Tx Hex: %s\n", raw_tx_hex);
 	free(buffer);
 	return 0;
-}
-
-// Helper: Double SHA256 hash
-static void double_sha256(const uint8_t *data, size_t len, uint8_t *hash) {
-    	gcry_md_hd_t hd;
-    	gcry_md_open(&hd, GCRY_MD_SHA256, 0);
-    	gcry_md_write(hd, data, len);
-    	gcry_md_final(hd);
-    	uint8_t temp[32];
-    	memcpy(temp, gcry_md_read(hd, GCRY_MD_SHA256), 32);
-    	gcry_md_close(hd);
-    	gcry_md_open(&hd, GCRY_MD_SHA256, 0);
-    	gcry_md_write(hd, temp, 32);
-    	gcry_md_final(hd);
-    	memcpy(hash, gcry_md_read(hd, GCRY_MD_SHA256), 32);
-    	gcry_md_close(hd);
 }
 
 int construct_scriptcode(uint8_t *pubkeyhash, char *scriptcode) {
@@ -944,11 +845,11 @@ printf("FINAL SIGNED HEX:\n%s\n", *raw_tx_hex);
     	return 0;
 }
 
-int broadcast_transaction(const char **raw_tx_hex, time_t *last_request) {
+int broadcast_transaction(char **raw_tx_hex, time_t *last_request) {
 	CURL *curl = curl_easy_init();
 	if (!curl) return -1;
 	printf("Broadcasting your transaction...\n");
-	char url[] = "https://blockchain.info/pushtx";
+	char url[] = "https://0000000blockchain.info/pushtx";
 	char post_data[2048];
 	snprintf(post_data, sizeof(post_data), "tx=%s", *raw_tx_hex);
 	
@@ -969,6 +870,7 @@ int broadcast_transaction(const char **raw_tx_hex, time_t *last_request) {
 	*last_request = time(NULL);
 	curl_easy_cleanup(curl);
 	if (res != CURLE_OK) {
+		fprintf(stderr, "CURL request failed\n");
 		free(buffer.data);
 		return -1;
 	}

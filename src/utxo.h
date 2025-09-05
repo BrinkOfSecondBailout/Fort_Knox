@@ -25,6 +25,6 @@ int address_to_scriptpubkey(const char *, uint8_t *, size_t *);
 int build_transaction(const char*, long long, utxo_t **, int, key_pair_t *, long long, char **);
 int construct_preimage(uint8_t *, size_t, utxo_t **, int, uint8_t *);
 int sign_transaction(char **, utxo_t **, int);
-int broadcast_transaction(const char **, time_t *);
+int broadcast_transaction(char **, time_t *);
 
 #endif
