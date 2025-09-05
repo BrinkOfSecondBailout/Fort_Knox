@@ -54,7 +54,7 @@ To build and run Fort Knox, you need the following:
 
 2. **Clone the Repository**:
    ```bash
-   git clone https://github.com/BrinkOfSecondBailout/fort_knox.git
+   git clone https://github.com/BrinkOfSecondBailout/Fort_Knox.git
    cd fort_knox/src
    ```
 
