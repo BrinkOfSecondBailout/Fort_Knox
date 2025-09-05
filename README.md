@@ -5,7 +5,7 @@
 
 This project is under active development, currently supporting basic mainnet operations with plans for testnet support and advanced features like Replace-By-Fee (RBF), UTXO consolidations...etc
 
-### <u>IMPORTANT: FOR EDUCATIONAL PURPOSES ONLY</u>
+### <ins>IMPORTANT: FOR EDUCATIONAL PURPOSES ONLY</ins>
 - This is a hot wallet built by one single developer, not yet tested and verified by peers.
 - You should never **"TRUST"** any app or project without proof-of-work and verifications, as per the bitcoin ethos.
 - Experiment with TINY amounts of sats at your own risk, note that **any funds sent to an address derived by this wallet could potentially be lost forever.**
