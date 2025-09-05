@@ -449,9 +449,7 @@ int build_transaction(const char *recipient, long long amount, utxo_t **selected
 			buffer[pos + j] = txid_bytes[31 - j];
 		}
 		pos += 32;
-//print_bytes_as_hex("Input TxId Reversed", txid_bytes, 32);
 		// vout
-//printf("Vout (input): %d\n", (*selected)[i].vout);
 		encode_uint32_le((*selected)[i].vout, buffer + pos);
 		pos += 4;
 		// ScriptSig (empty for P2WPKWH)
@@ -544,7 +542,6 @@ int construct_scriptcode(uint8_t *pubkeyhash, char *scriptcode) {
 	strcpy(scriptcode, "1976a914");
 	bytes_to_hex(pubkeyhash, 20, scriptcode + 8, 41);
 	strcat(scriptcode, "88ac");
-printf("Scriptcode: %s\n", scriptcode);
 	return 0;
 }
 
@@ -699,10 +696,8 @@ int construct_preimage(uint8_t *tx_data, size_t tx_len, utxo_t **selected, int n
 	// Add sig hash type at the end
 	memcpy(preimage + preimage_pos, sighash_type, 4);
 	preimage_pos += 4;
-print_bytes_as_hex("Final preimage", preimage, preimage_pos);
 	// Sighash type
 	double_sha256(preimage, preimage_pos, sighash);
-print_bytes_as_hex("Sighash", sighash, 32);
 	free(preimage);
 	return 0; 
 }
@@ -749,9 +744,6 @@ int sign_preimage_hash(uint8_t *sighash, uint8_t *privkey, uint8_t *witness, siz
 	size_t r_len, s_len;
 	const void *r_data = gcry_sexp_nth_data(r, 1, &r_len);
 	const void *s_data = gcry_sexp_nth_data(s, 1, &s_len);
-print_bytes_as_hex("R", r_data, r_len);
-print_bytes_as_hex("S", s_data, s_len);
-print_bytes_as_hex("Pubkey", pubkey, PUBKEY_LENGTH);
 	// DER encode the signature
 	encoded_sig[0] = 0x30;
 	encoded_sig[1] = r_len + s_len + 4;
@@ -766,7 +758,6 @@ print_bytes_as_hex("Pubkey", pubkey, PUBKEY_LENGTH);
 	// Calculate total encoded sig len
 	sig_len = 7 + r_len + s_len;
 	//encoded_sig[sig_len] = '\0';
-print_bytes_as_hex("Serialized DER Encoded Signature (with Sighash type)", encoded_sig, sig_len);
 	gcry_sexp_release(priv_sexp);
 	gcry_sexp_release(sig_sexp);
 	gcry_sexp_release(r);
@@ -779,12 +770,10 @@ print_bytes_as_hex("Serialized DER Encoded Signature (with Sighash type)", encod
 	witness[2 + sig_len] = PUBKEY_LENGTH;
 	memcpy(3 + witness + sig_len, pubkey, PUBKEY_LENGTH);
 	*witness_len = 3 + sig_len + PUBKEY_LENGTH;
-print_bytes_as_hex("Full serialized witness", witness, *witness_len);	
 	return 0;
 }
 
 int sign_transaction(char **raw_tx_hex, utxo_t **selected, int num_selected) {
-	printf("Raw Unsigned Tx Hex: %s\n", *raw_tx_hex);
 	if (!raw_tx_hex || !selected || num_selected <= 0) {
 		fprintf(stderr, "Invalid inputs\n");
 		return 1;
@@ -828,8 +817,6 @@ int sign_transaction(char **raw_tx_hex, utxo_t **selected, int num_selected) {
 	}
 	// Insert locktime at the end after witness
 	memcpy(new_tx_data + witness_pos, locktime, 4);
-print_bytes_as_hex("Locktime", locktime, 4);
-print_bytes_as_hex("New Data + Witness + Locktime", new_tx_data, new_tx_len);
 	// Convert back to hex
     	char *new_raw_tx_hex = malloc(new_tx_len * 2);
     	if (!new_raw_tx_hex) {
@@ -840,7 +827,6 @@ print_bytes_as_hex("New Data + Witness + Locktime", new_tx_data, new_tx_len);
     	bytes_to_hex(new_tx_data, new_tx_len, new_raw_tx_hex, new_tx_len * 2);
 	
     	*raw_tx_hex = new_raw_tx_hex;
-printf("FINAL SIGNED HEX:\n%s\n", *raw_tx_hex);
 	free(new_tx_data);
     	return 0;
 }

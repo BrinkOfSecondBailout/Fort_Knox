@@ -5,10 +5,10 @@
 
 This project is under active development, currently supporting basic mainnet operations with plans for testnet support and advanced features like Replace-By-Fee (RBF), UTXO consolidations...etc
 
-## IMPORTANT: FOR EDUCATIONAL PURPOSES ONLY!
-- **This is a hot wallet built by one single developer, not yet tested and verified by peers.**
-- **You should not "TRUST" any app or project without proof-of-work and verifications, as per the bitcoin ethos.**
-- **Experiment with TINY amounts of sats at your own risk, note that any funds sent to an address derived by this wallet could potentially be lost forever.**
+### IMPORTANT: FOR EDUCATIONAL PURPOSES ONLY!
+- **This is a hot wallet built by one single developer, not yet tested and verified by peers.
+- **You should not "TRUST" any app or project without proof-of-work and verifications, as per the bitcoin ethos.
+- **Experiment with TINY amounts of sats at your own risk, note that any funds sent to an address derived by this wallet could potentially be lost forever.
 
 ## Features
 - **HD Wallet Generation**: Creates BIP-32/BIP-44 compliant keys for mainnet Bech32 addresses (`bc1q...`).

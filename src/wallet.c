@@ -109,14 +109,12 @@ int pubkeyhash_to_address(const uint8_t *pub_key_hash, size_t pub_key_hash_len, 
 // Convert compressed pub to P2WPKH (Segwit) address
 int pubkey_to_address(const uint8_t *pub_key, size_t pub_key_len, char *address, size_t address_len) {
 	if (pub_key_len != PUBKEY_LENGTH || !address) return -1;
-//print_bytes_as_hex("Original pub key (33 bytes)", pub_key, pub_key_len);
 	// Compute SHA256
 	uint8_t sha256[32];
 	gcry_md_hash_buffer(GCRY_MD_SHA256, sha256, pub_key, pub_key_len);
 	// Compute RIPEMD160
 	uint8_t ripemd160[20];
 	gcry_md_hash_buffer(GCRY_MD_RMD160, ripemd160, sha256, 32);
-//print_bytes_as_hex("After RIPEMD160 (PubKeyHash) (20 bytes)", ripemd160, 20);
 	// Convert PubKeyHash to 5-bit groups
 	uint8_t program_values[BECH32_VALUES_MAX];
 	size_t program_values_len;
@@ -291,12 +289,6 @@ int generate_master_key(const uint8_t *seed, size_t seed_len, key_pair_t *master
 	memcpy(master->key_pub_extended, master->key_pub_compressed, PUBKEY_LENGTH);
 	memcpy(master->key_pub_extended + PUBKEY_LENGTH, master->chain_code, CHAINCODE_LENGTH);
 	master->key_index = 0; // Master is at depth 0
-/*
-print_bytes_as_hex("Master Priv    ", master->key_priv, PRIVKEY_LENGTH);
-print_bytes_as_hex("Chain Code     ", master->chain_code, CHAINCODE_LENGTH);
-print_bytes_as_hex("Compressed Pub ", master->key_pub_compressed, PUBKEY_LENGTH);
-print_bytes_as_hex("Extended Pub   ", master->key_pub_extended, PUBKEY_LENGTH + CHAINCODE_LENGTH);
-*/
 	return 0;
 }
 
@@ -376,11 +368,6 @@ int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child
     	memcpy(child->key_pub_extended, child->key_pub_compressed, PUBKEY_LENGTH);
     	memcpy(child->key_pub_extended + PUBKEY_LENGTH, child->chain_code, CHAINCODE_LENGTH); 
 	child->key_index = index & 0xFF;
-/*
-print_bytes_as_hex("Child Priv Extended    ", child->key_priv_extended, PRIVKEY_LENGTH + CHAINCODE_LENGTH);
-print_bytes_as_hex("Child Pub Compressed   ", child->key_pub_compressed, PUBKEY_LENGTH);
-print_bytes_as_hex("Child Pub Extended     ", child->key_pub_extended, PUBKEY_LENGTH + CHAINCODE_LENGTH);
-*/
 	return 0;
 }
 
@@ -417,8 +404,6 @@ int derive_from_change_to_child(const key_pair_t *change_key, uint32_t child_ind
 		fprintf(stderr, "Failed to derive index key\n");
 		return -1;
 	}
-//print_bytes_as_hex("Child key priv", child_key->key_priv, PRIVKEY_LENGTH);
-//print_bytes_as_hex("Child key pub", child_key->key_pub_compressed, PUBKEY_LENGTH);
 	return 0;
 }
 
@@ -429,8 +414,6 @@ int derive_from_account_to_change(const key_pair_t *account_key, uint32_t change
 		fprintf(stderr, "Failure deriving child key\n");
 		return -1;
 	}
-//print_bytes_as_hex("Change key priv", change_key->key_priv, PRIVKEY_LENGTH);
-//print_bytes_as_hex("Change key pub", change_key->key_pub_compressed, PUBKEY_LENGTH);
 	return 0;
 }
 
@@ -449,8 +432,6 @@ int derive_from_public_to_account(const key_pair_t *pub_key, uint32_t account_in
 		zero_and_gcry_free((void *)purpose_key, sizeof(key_pair_t));
 		return 1;
 	}
-//print_bytes_as_hex("Purpose key priv", purpose_key->key_priv, PRIVKEY_LENGTH);
-//print_bytes_as_hex("Purpose key pub", purpose_key->key_pub_compressed, PUBKEY_LENGTH);
 	key_pair_t *coin_key = NULL;
 	coin_key = gcry_malloc_secure(sizeof(key_pair_t));
 	if (!coin_key) {
@@ -465,16 +446,12 @@ int derive_from_public_to_account(const key_pair_t *pub_key, uint32_t account_in
 		return 1;
 	}
 	
-//print_bytes_as_hex("Coin key priv", coin_key->key_priv, PRIVKEY_LENGTH);
-//print_bytes_as_hex("Coin key pub", coin_key->key_pub_compressed, PUBKEY_LENGTH);
 	result = derive_child_key(coin_key, HARD_FLAG | account_index, account_key); // m/44'/0'/account'
 	if (result != 0) {
 		fprintf(stderr, "Failed to derive account 0 key\n");
 		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)purpose_key, (void *)coin_key, NULL);
 		return 1;
 	}
-//print_bytes_as_hex("Account key priv", account_key->key_priv, PRIVKEY_LENGTH);
-//print_bytes_as_hex("Account key pub", account_key->key_pub_compressed, PUBKEY_LENGTH);
 	zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)purpose_key, (void *)coin_key, NULL);
 	return 0;
 } 
