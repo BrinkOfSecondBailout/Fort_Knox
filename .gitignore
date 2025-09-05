@@ -1,4 +1,5 @@
 knox
+test_vectors
 *.o
-*.png
+*qrcode.png
 *.swp
