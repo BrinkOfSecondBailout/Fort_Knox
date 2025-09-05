@@ -53,7 +53,11 @@ To build and run Fort Knox, you need the following:
 
 3. **Compile the Wallet**:
    ```bash
-   gcc -o knox knox.c $(pkg-config --cflags --libs jansson libcurl libgcrypt) -lm
+   gcc -o knox knox.c crypt.c wallet.c mnemonic.c utxo.c hash.c $(pkg-config --cflags --libs jansson libcurl libgcrypt) -lm
+   ```
+   or just use the Makefile already provided
+   ```bash
+   sudo make
    ```
 
 ## Usage
@@ -112,9 +116,13 @@ To test on the Bitcoin testnet, modify the API endpoints:
 - Use Bech32 addresses with `tb1q` prefix.
 
 ### Running Tests
-1. Create a test file (e.g., `test_preimage.c`):
+1. Compile the test file:
    ```bash
-   gcc -o test_vectors test_vector.c $(pkg-config --cflags --libs libgcrypt jansson) -lm
+   gcc -o test_vectors test_vectors.c crypt.c mnemonic.c wallet.c utxo.c hash.c $(pkg-config --cflags --libs libgcrypt jansson) -lm
+   ```
+   or just use the Makefile already provided
+   ```bash
+   sudo make test
    ```
 2. Run the test:
    ```bash
