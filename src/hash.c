@@ -155,7 +155,7 @@ void print_5bit_groups(const char *label, const uint8_t *groups, size_t num_grou
 }
 
 void convert_bits(uint8_t *out, size_t *outlen, const uint8_t *in, size_t inlen, int inbits, int outbits, int pad) {
-	// Convert witness program bytes in to groups of 8 bits then split into groups of 5-bit
+	// Convert witness program bytes into groups of *inbits* then split into groups of *outbits*
 	uint32_t val = 0;
 	int bits = 0;
 	size_t idx = 0;
@@ -173,6 +173,7 @@ void convert_bits(uint8_t *out, size_t *outlen, const uint8_t *in, size_t inlen,
 	*outlen = idx;
 }
 
+// Checksum
 uint32_t bech32_polymod(const uint8_t *values, size_t len) {
     static const uint32_t gen[] = {0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3};
     uint32_t chk = 1;

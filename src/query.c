@@ -3,6 +3,7 @@
 #include <curl/curl.h>
 #include "query.h"
 #include "wallet.h"
+#include "hash.h"
 
 // Matching the parameters prototype of how curl expects their callback function
 size_t curl_write_callback_func(void *contents, size_t size, size_t nmemb, void *userdata) {
@@ -21,17 +22,11 @@ size_t curl_write_callback_func(void *contents, size_t size, size_t nmemb, void 
 	return realsize;
 }
 
-double get_bitcoin_price(time_t *last_request) {
-	CURL *curl = curl_easy_init();
-	if (!curl) {
-		fprintf(stderr, "Failed to initialize CURL\n");
-		return -1.0;
-	}
-	char url[] = "https://blockchain.info/ticker";
-	curl_buffer_t buffer = {0};
+int set_curl_run_curl(CURL *curl, char *url, curl_buffer_t *buffer, time_t *last_request) {
+	// Set the behaviors for the curl handle
 	curl_easy_setopt(curl, CURLOPT_URL, url);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_callback_func);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buffer);
+    	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_callback_func);
+    	curl_easy_setopt(curl, CURLOPT_WRITEDATA, buffer);
 
 	time_t now = time(NULL);
 	if (*last_request != 0 && difftime(now, *last_request) < SECS_PER_REQUEST) {
@@ -39,14 +34,39 @@ double get_bitcoin_price(time_t *last_request) {
 		printf("Rate limit: 1 request per 20 seconds...\nWaiting %d seconds...\n", sleep_time);
 		sleep(sleep_time);
 	}
-	CURLcode res = curl_easy_perform(curl);
+	// Perform network transfer
+    	CURLcode res = curl_easy_perform(curl);
 	*last_request = time(NULL);
-	curl_easy_cleanup(curl);
-	if (res != CURLE_OK) {
+    	curl_easy_cleanup(curl);
+
+    	if (res != CURLE_OK) {
 		fprintf(stderr, "CURL failed: %s\n", curl_easy_strerror(res));
-		free(buffer.data);
-		return -1.0;
+        	free(buffer->data);
+        	return 1;
+    	}
+	return 0;
+}
+
+int init_curl(CURL **curl) {
+	*curl = curl_easy_init();
+	if (!*curl) {
+		fprintf(stderr, "Init Curl failure\n");
+		return 1;
 	}
+	return 0;
+}
+
+double get_bitcoin_price(time_t *last_request) {
+	CURL *curl = NULL; 
+	int result = init_curl(&curl);
+	if (result != 0) return 1;
+
+	char url[] = "https://blockchain.info/ticker";
+	
+	curl_buffer_t buffer = {0};
+	result = set_curl_run_curl(curl, url, &buffer, last_request);
+	if (result != 0) return 1;
+
 	json_error_t error;
     	json_t *root = json_loads(buffer.data, 0, &error);
     	free(buffer.data);
@@ -73,40 +93,23 @@ double get_bitcoin_price(time_t *last_request) {
 }
 
 int init_curl_and_addresses(const char **addresses, int num_addresses, curl_buffer_t *buffer, time_t *last_request) {
+	CURL *curl = NULL;
 	// Set a curl handle for the data transfer
-	CURL *curl = curl_easy_init();
-	if (!curl) return -1;
+	int result = init_curl(&curl);
+	if (result != 0) return 1;
+
 	// Build pipe-separated address list for API
 	char addr_list[1024 * 2] = {0};
-
 	for (int i = 0; i < num_addresses; i++) {
 		strncat(addr_list, addresses[i], sizeof(addr_list) - strlen(addr_list) - 2);
 		if (i < num_addresses - 1) strncat(addr_list, "|", sizeof(addr_list) - strlen(addr_list) - 2);
 	}
 	char url[2048];
 	snprintf(url, sizeof(url), "https://blockchain.info/multiaddr?active=%s", addr_list);
-	
+
 	// Set the behaviors for the curl handle
-	curl_easy_setopt(curl, CURLOPT_URL, url);
-    	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_callback_func);
-    	curl_easy_setopt(curl, CURLOPT_WRITEDATA, buffer);
-
-	time_t now = time(NULL);
-	if (*last_request != 0 && difftime(now, *last_request) < SECS_PER_REQUEST) {
-		int sleep_time = SECS_PER_REQUEST - (int)difftime(now, *last_request);
-		printf("Rate limit: 1 request per 20 seconds...\nWaiting %d seconds...\n", sleep_time);
-		sleep(sleep_time);
-	}
-	// Perform blocking network transfer
-    	CURLcode res = curl_easy_perform(curl);
-	*last_request = time(NULL);
-    	curl_easy_cleanup(curl);
-
-    	if (res != CURLE_OK) {
-		fprintf(stderr, "CURL failed: %s\n", curl_easy_strerror(res));
-        	free(buffer->data);
-        	return -1;
-    	}
+	result = set_curl_run_curl(curl, url, buffer, last_request);
+	if (result != 0) return 1;
 	return 0;
 }
 
@@ -119,29 +122,17 @@ int estimated_transaction_size(int num_inputs, int num_outputs) {
 }
 
 int get_fee_rate(long long *regular_rate, long long *priority_rate, time_t *last_request) {
-	printf("Finding miners fee rate...\n");
-	CURL *curl = curl_easy_init();
-	if (!curl) return -1;
+	printf("Fetching miners fee rate...\n");
+	CURL *curl = NULL;
+	int result = init_curl(&curl);
+	if (result != 0) return 1;
+
 	char url[] = "https://mempool.space/api/v1/fees/recommended";
 	curl_buffer_t buffer = {0};
-	curl_easy_setopt(curl, CURLOPT_URL, url);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_callback_func);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buffer);
 	
-	time_t now = time(NULL);
-	if (*last_request != 0 && difftime(now, *last_request) < SECS_PER_REQUEST) {
-		int sleep_time = SECS_PER_REQUEST - (int)difftime(now, *last_request);
-		printf("Rate limit: 1 request per 20 seconds...\nWaiting %d seconds...\n", sleep_time);
-		sleep(sleep_time);
-	}
-	CURLcode res = curl_easy_perform(curl);
-	*last_request = time(NULL);
-	curl_easy_cleanup(curl);
-	if (res != CURLE_OK) {
-		free(buffer.data);
-		fprintf(stderr, "CURL failed: %s\n", curl_easy_strerror(res));
-		return -1;
-	}
+	result = set_curl_run_curl(curl, url, &buffer, last_request);
+	if (result != 0) return 1;
+	
 	json_error_t error;
 	json_t *root = json_loads(buffer.data, 0, &error);
 	free(buffer.data);

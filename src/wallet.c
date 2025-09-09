@@ -8,6 +8,15 @@
 #include "hash.h"
 #include "query.h"
 
+int extended_key_to_address(key_pair_t *parent, key_pair_t *extended) {
+	uint8_t version[4];
+	uint8_t depth[1];
+	uint8_t parent_fprint[4];
+	uint8_t child_index[4];
+	uint8_t chain_code[32];
+	uint8_t key[33];
+}
+
 int key_to_pubkeyhash(key_pair_t *key, uint8_t *pubkeyhash) {
 	if (!key) {
 		fprintf(stderr, "Invalid input\n");
@@ -38,13 +47,12 @@ int pubkeyhash_to_address(const uint8_t *pub_key_hash, size_t pub_key_hash_len, 
 		fprintf(stderr, "Unexpected program length: %zu\n", program_values_len);
 		return 1;
 	}
-	// Finish creating ScriptPubKey
 	// Data values = version (5-bit) + program_values
 	uint8_t data_values[BECH32_VALUES_MAX];
-	data_values[0] = 0;
+	data_values[0] = 0; // OP_0
 	memcpy(data_values + 1, program_values, program_values_len);
 	size_t data_values_len = 1 + program_values_len;
-
+	// Data values = ScriptPubKey
 
 	// Add HRP and compute checksum
 	const char *hrp = "bc"; // Mainnet, use 'tb' for testnet
@@ -114,8 +122,8 @@ int pubkey_to_address(const uint8_t *pub_key, size_t pub_key_len, char *address,
 	gcry_md_hash_buffer(GCRY_MD_SHA256, sha256, pub_key, pub_key_len);
 	// Compute RIPEMD160
 	uint8_t ripemd160[20];
-	gcry_md_hash_buffer(GCRY_MD_RMD160, ripemd160, sha256, 32);
-	// Convert PubKeyHash to 5-bit groups
+	gcry_md_hash_buffer(GCRY_MD_RMD160, ripemd160, sha256, 32); // This is the PubKeyHash aka Witness Program
+	// Convert PubKeyHash aka Witness Program to 5-bit groups
 	uint8_t program_values[BECH32_VALUES_MAX];
 	size_t program_values_len;
 	convert_bits(program_values, &program_values_len, ripemd160, 20, 8, 5, 1);
@@ -123,15 +131,14 @@ int pubkey_to_address(const uint8_t *pub_key, size_t pub_key_len, char *address,
 		fprintf(stderr, "Unexpected program length: %zu\n", program_values_len);
 		return 1;
 	}
-	// Finish creating ScriptPubKey
 	// Data values = version (5-bit) + program_values
 	uint8_t data_values[BECH32_VALUES_MAX];
-	data_values[0] = 0;
+	data_values[0] = 0; // Op_0
 	memcpy(data_values + 1, program_values, program_values_len);
 	size_t data_values_len = 1 + program_values_len;
+	// Data values is the ScriptPubKey
 
-
-	// Add HRP and compute checksum
+	// Add HRP (human readable part) and compute checksum
 	const char *hrp = "bc"; // Mainnet, use 'tb' for testnet
 	size_t hrp_len = strlen(hrp);
 	size_t check_values_len = data_values_len + hrp_len * 2 + 7; // 1 for separator, 6 for '0' padding
@@ -288,11 +295,13 @@ int generate_master_key(const uint8_t *seed, size_t seed_len, key_pair_t *master
 	}
 	memcpy(master->key_pub_extended, master->key_pub_compressed, PUBKEY_LENGTH);
 	memcpy(master->key_pub_extended + PUBKEY_LENGTH, master->chain_code, CHAINCODE_LENGTH);
-	master->key_index = 0; // Master is at depth 0
+	master->key_index = (uint32_t)0;
+	master->depth = (uint8_t)0; // Master key is at depth 0
 	return 0;
 }
 
-
+// This function always requires a parent private key to calculate a child private/public key pair
+// Not suitable for a watch-only wallet function where only a parent public key is needed to create a child public key for non-hardened derivation
 int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child) {
 	uint8_t data[37]; // For HMAC input, 1 + 32 priv + 4 index or 33 pub + 4 index
 	size_t data_len;
@@ -367,7 +376,8 @@ int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child
     	memcpy(child->key_priv_extended + PRIVKEY_LENGTH, child->chain_code, CHAINCODE_LENGTH);
     	memcpy(child->key_pub_extended, child->key_pub_compressed, PUBKEY_LENGTH);
     	memcpy(child->key_pub_extended + PUBKEY_LENGTH, child->chain_code, CHAINCODE_LENGTH); 
-	child->key_index = index & 0xFF;
+	child->key_index = index;
+	child->depth = (uint8_t)(parent->depth + 1);	
 	return 0;
 }
 

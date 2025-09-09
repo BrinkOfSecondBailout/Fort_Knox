@@ -120,6 +120,7 @@ void print_commands() {
 	"- new					Create a new bitcoin wallet\n"
 	"- recover				Recover your bitcoin wallet with mnemonic words(& passphrase, if set)\n"
 	"- balance				Display balance for all addresses in current wallet\n"
+	"- fee					Fetches the recommended fee rate from mempool.space\n"
 	"- receive				Receive bitcoin with a new address\n"
 	"- send					Send bitcoin to an address\n"
 	"- help					Safety practices, tips, and educational contents\n"
@@ -133,6 +134,7 @@ Command_Handler c_handlers[] = {
 	{ (char *)"new", new_handle},
 	{ (char *)"recover", recover_handle},
 	{ (char *)"balance", balance_handle},
+	{ (char *)"fee", fee_handle},
 	{ (char *)"receive", receive_handle},
 	{ (char *)"send", send_handle},
 	{ (char *)"help", help_handle},
@@ -256,7 +258,7 @@ int32 new_handle(User *user) {
 		fprintf(stderr, "Failure generate wallet seed.\n");
 		return 1;
 	}
-	printf("Here is your brand new bitcoin wallet's mnemonic seed words:\n"
+	printf("Here is your new bitcoin wallet's mnemonic seed words:\n"
 		"\n\n"
 		GREEN"%s\n"RESET
 		"\n\n"
@@ -284,6 +286,7 @@ int32 new_handle(User *user) {
 		return 1;
 	}
 	zero((void *)user->master_key, sizeof(key_pair_t));
+	// Generate master private and public key
 	result = generate_master_key(user->seed, SEED_LENGTH, user->master_key);
 	if (result != 0) {
 		zero((void *)user->seed, SEED_LENGTH);
@@ -505,6 +508,32 @@ int32 balance_handle(User *user) {
 		printf("Failed to retrieve balance\n");
 	}
 	curl_global_cleanup();
+	return 0;
+}
+
+int32 fee_handle(User *user) {
+	long long regular_rate;
+	long long priority_rate;
+	
+	if (get_fee_rate(&regular_rate, &priority_rate, &user->last_api_request) != 0) {
+		fprintf(stderr, "Fee rate fetch failed.\n");
+		return 1;
+	}
+	printf("Here are the current market fee rates (in satoshis):\n"
+		"Regular (per bytes): %lld (%.8f BTC)\n"
+		"Priority (per bytes): %lld (%.8f BTC)\n"
+		"Regular total fee (estimated for typical transaction of 1 input and 2 outputs):\n"
+		"%lld\n"
+		"Priority total fee (estimated for typical transaction of 1 input and 2 outputs):\n"
+		"%lld\n"
+		"A transaction of 1 input and 1 output is about 192 bytes.\n"
+		"A transaction of 1 input and 2 outputs is about 226 bytes. (most common, this includes the 'change' back to yourself)\n"
+		"A transaction of 2 input and 2 outputs is about 338 bytes.\n"
+		"A transaction of 2 inputs and 2 outputs is about 374 bytes. (very common)\n",
+		regular_rate, regular_rate / SATS_PER_BTC,
+		priority_rate, priority_rate / SATS_PER_BTC,
+		regular_rate * (long long)estimated_transaction_size(1, 2),
+		priority_rate * (long long)estimated_transaction_size(1, 2));
 	return 0;
 }
 

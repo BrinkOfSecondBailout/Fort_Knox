@@ -771,6 +771,7 @@ int sign_transaction(char **raw_tx_hex, utxo_t **selected, int num_selected) {
     	bytes_to_hex(new_tx_data, new_tx_len, new_raw_tx_hex, new_tx_len * 2);
 	
     	*raw_tx_hex = new_raw_tx_hex;
+printf("Signed hex: %s\n", *raw_tx_hex);
 	free(new_tx_data);
     	return 0;
 }

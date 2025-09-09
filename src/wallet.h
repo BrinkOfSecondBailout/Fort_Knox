@@ -28,7 +28,8 @@ struct key_pair {
 	uint8_t key_priv_extended[PRIVKEY_LENGTH + CHAINCODE_LENGTH];
 	uint8_t key_pub_compressed[PUBKEY_LENGTH];
 	uint8_t key_pub_extended[PUBKEY_LENGTH + CHAINCODE_LENGTH];
-	uint8_t key_index;
+	uint32_t key_index;
+	uint8_t depth; // how many derivations deep from master key
 };
 
 typedef struct {

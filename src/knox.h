@@ -7,7 +7,7 @@
 typedef unsigned int int32;
 
 typedef struct {
-	uint8_t seed[SEED_LENGTH];
+	uint8_t seed[SEED_LENGTH]; // 64 bytes
 	key_pair_t *master_key;
 	account_t **accounts;
 	size_t accounts_count;
@@ -27,6 +27,7 @@ int32 price_handle(User *);
 int32 new_handle(User *);
 int32 recover_handle(User *);
 int32 balance_handle(User *);
+int32 fee_handle(User *);
 int32 receive_handle(User *);
 int32 send_handle(User *);
 int32 help_handle(User *);
