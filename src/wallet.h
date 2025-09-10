@@ -37,6 +37,7 @@ typedef struct {
 	uint32_t used_indexes_count;
 } account_t;
 
+int serialize_extended_key(key_pair_t *, key_pair_t *, int, char **);
 int key_to_pubkeyhash(key_pair_t *key, uint8_t *pubkeyhash);
 int pubkeyhash_to_address(const uint8_t *, size_t, char *, size_t);
 int pubkey_to_address(const uint8_t *, size_t, char *, size_t);

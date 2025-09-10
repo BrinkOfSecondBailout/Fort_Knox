@@ -8,13 +8,71 @@
 #include "hash.h"
 #include "query.h"
 
-int extended_key_to_address(key_pair_t *parent, key_pair_t *extended) {
-	uint8_t version[4];
-	uint8_t depth[1];
-	uint8_t parent_fprint[4];
-	uint8_t child_index[4];
-	uint8_t chain_code[32];
+int serialize_extended_key(key_pair_t *parent, key_pair_t *extended, int private, char **output) {
+	if (!extended) {
+		fprintf(stderr, "Invalid inputs\n");
+		return 1;
+	}
+	uint8_t serialized_data[82];
+	size_t data_len = 0;
+	// Version bytes (mainnet xpriv or xpub)
+	uint8_t version[4] = {0x04, 0x88, private ? 0xad : 0xb2, private ? 0xe4 : 0x1e };
+	memcpy(serialized_data, version, 4);
+	data_len += 4;
+	// Depth
+	uint8_t depth = extended->depth;
+	memcpy(serialized_data + data_len, &depth, 1);
+	data_len += 1;
+	// Parent fingerprint
+	uint8_t parent_fprint[4] = {0}; // Default 0 for master key
+	if (parent) {
+print_bytes_as_hex("Parent Pub", parent->key_pub_compressed, PUBKEY_LENGTH);
+		// Compute SHA256
+		uint8_t sha256[32];
+		gcry_md_hash_buffer(GCRY_MD_SHA256, sha256, parent->key_pub_compressed, PUBKEY_LENGTH);
+		// Compute RIPEMD160
+		uint8_t ripemd160[20];
+		gcry_md_hash_buffer(GCRY_MD_RMD160, ripemd160, sha256, 32); 		
+
+print_bytes_as_hex("RipeMD160", ripemd160, 20);
+		memcpy(parent_fprint, ripemd160, 4);
+	}
+print_bytes_as_hex("Parent FPrint", parent_fprint, 4);
+	memcpy(serialized_data + data_len, parent_fprint, 4);
+	data_len += 4;
+	// Child index (big-endian)
+	uint32_t child_index = extended->key_index;
+	serialized_data[data_len + 0] = (child_index >> 24) & 0xFF;
+	serialized_data[data_len + 1] = (child_index >> 16) & 0xFF;
+	serialized_data[data_len + 2] = (child_index >> 8) & 0xFF;
+	serialized_data[data_len + 3] = child_index & 0xFF;
+	data_len += 4;
+	// Chain code
+	memcpy(serialized_data + data_len, extended->chain_code, CHAINCODE_LENGTH);
+	data_len += 32;
+	// Key (priv with 0x00 prefix, or public)
 	uint8_t key[33];
+	if (private) {
+		key[0] = 0x00;
+		memcpy(key + 1, extended->key_priv, PRIVKEY_LENGTH);
+	} else {
+		memcpy(key, extended->key_pub_compressed, PUBKEY_LENGTH);
+	}
+	memcpy(serialized_data + data_len, key, 33);
+	data_len += 33;
+print_bytes_as_hex("Serialized", serialized_data, data_len);
+	// Checksum (first 4 bytes of double SHA256)
+	uint8_t hash[32];
+	double_sha256(serialized_data, data_len, hash);
+	memcpy(serialized_data + data_len, hash, 4);
+	data_len += 4;
+	// Base58 encode
+	*output = base58_encode(serialized_data, data_len);
+	if (!output) {
+		fprintf(stderr, "Base58 encode failure\n");
+		return 1;
+	} 	
+	return 0;
 }
 
 int key_to_pubkeyhash(key_pair_t *key, uint8_t *pubkeyhash) {

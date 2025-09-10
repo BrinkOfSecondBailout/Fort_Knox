@@ -429,6 +429,42 @@ int run_sign_transaction_test() {
 	return 0;
 }
 
+int run_serialize_key_test() {
+	key_pair_t *parent = malloc(sizeof(key_pair_t));
+	key_pair_t *extended = malloc(sizeof(key_pair_t));
+	if (!parent || !extended) {
+		fprintf(stderr, "Failure allocation\n");
+		return 1;
+	}
+	uint8_t pubkey[PUBKEY_LENGTH];
+	resize_convert_hex_to_bytes("03eb14dc2a7706de51703fbbb6db4554778c66b9616f118ef86fa08dcfaafb2233", pubkey);
+	memcpy(parent->key_pub_compressed, pubkey, PUBKEY_LENGTH);
+	
+	extended->depth = (uint8_t)3;
+	extended->key_index = (uint32_t)0;
+	uint8_t privkey[PRIVKEY_LENGTH];
+	resize_convert_hex_to_bytes("ecdfbc93835a2bf8e19f3f31d691226a1c39a55b904d6d77a9857bf69fd4708b", privkey);
+	memcpy(extended->key_priv, privkey, PRIVKEY_LENGTH);
+	uint8_t chaincode[CHAINCODE_LENGTH];
+	resize_convert_hex_to_bytes("6e9c5f5af83f84b231d150b1219a7f11343f6b2b556f54ec2be7a9bc3cf10d04", chaincode);
+	memcpy(extended->chain_code, chaincode, CHAINCODE_LENGTH);	
+
+	char *output;
+	int result = serialize_extended_key(parent, extended, 1, &output);
+	if (result != 0) {
+		return 1;
+	}
+	char *expected = "xprv9zCsozBWymMKJDGytDW1GHLt9ktCanvsZ1BZQaBpkkAL4c9bh9ZoyJFruJkXAct2mQuo62Pp9hTGAFQPwrRwtWx1xRSEjNgvZQUMfkE6rg4";
+	printf("Expected: %s\n", expected);
+	printf("Result  : %s\n", output);
+	if (strncmp(output, expected, strlen(expected)) != 0) {
+		printf(RED"FAILED\n"RESET);
+		return 1;
+	}
+	printf(GREEN"PASSED\n"RESET);	
+	return 0;
+}
+
 int main() {
 	int failures = 0; 
 	//failures += run_mnemonic_test();
@@ -436,8 +472,9 @@ int main() {
 	//failures += run_mnemonic_recovery_test();
 	//failures += run_address_generation_test();
 	//failures += run_bech32_decoder();
-	failures += run_sign_transaction_test();
-    	printf("Total failures: %d\n", failures);
+	//failures += run_sign_transaction_test();
+    	failures += run_serialize_key_test();
+	printf("Total failures: %d\n", failures);
     	return failures > 0 ? 1 : 0;
 }
 
