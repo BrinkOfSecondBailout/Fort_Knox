@@ -13,6 +13,7 @@ int serialize_extended_key(key_pair_t *parent, key_pair_t *extended, int private
 		fprintf(stderr, "Invalid inputs\n");
 		return 1;
 	}
+print_bytes_as_hex("Chain Code", extended->chain_code, CHAINCODE_LENGTH);
 	uint8_t serialized_data[82];
 	size_t data_len = 0;
 	// Version bytes (mainnet xpriv or xpub)
@@ -46,6 +47,7 @@ print_bytes_as_hex("Parent FPrint", parent_fprint, 4);
 	serialized_data[data_len + 1] = (child_index >> 16) & 0xFF;
 	serialized_data[data_len + 2] = (child_index >> 8) & 0xFF;
 	serialized_data[data_len + 3] = child_index & 0xFF;
+print_bytes_as_hex("Child Index", serialized_data + data_len, 4);
 	data_len += 4;
 	// Chain code
 	memcpy(serialized_data + data_len, extended->chain_code, CHAINCODE_LENGTH);
@@ -55,8 +57,10 @@ print_bytes_as_hex("Parent FPrint", parent_fprint, 4);
 	if (private) {
 		key[0] = 0x00;
 		memcpy(key + 1, extended->key_priv, PRIVKEY_LENGTH);
+print_bytes_as_hex("Priv", extended->key_priv, PRIVKEY_LENGTH);
 	} else {
-		memcpy(key, extended->key_pub_compressed, PUBKEY_LENGTH);
+		memcpy(key, extended->key_pub_compressed, PUBKEY_LENGTH);		
+print_bytes_as_hex("Pub", extended->key_pub_compressed, PUBKEY_LENGTH);
 	}
 	memcpy(serialized_data + data_len, key, 33);
 	data_len += 33;
@@ -64,6 +68,7 @@ print_bytes_as_hex("Serialized", serialized_data, data_len);
 	// Checksum (first 4 bytes of double SHA256)
 	uint8_t hash[32];
 	double_sha256(serialized_data, data_len, hash);
+print_bytes_as_hex("Checksum", hash, 4);
 	memcpy(serialized_data + data_len, hash, 4);
 	data_len += 4;
 	// Base58 encode
@@ -485,7 +490,7 @@ int derive_from_account_to_change(const key_pair_t *account_key, uint32_t change
 	return 0;
 }
 
-int derive_from_public_to_account(const key_pair_t *pub_key, uint32_t account_index, key_pair_t *account_key) {
+int derive_from_master_to_account(const key_pair_t *master_key, uint32_t account_index, key_pair_t *account_key) {
 	// Derive from public to account - m/44'/0'/0'/account
 	key_pair_t *purpose_key = NULL;
 	purpose_key = gcry_malloc_secure(sizeof(key_pair_t));
@@ -494,7 +499,7 @@ int derive_from_public_to_account(const key_pair_t *pub_key, uint32_t account_in
 		zero_and_gcry_free((void *)purpose_key, sizeof(key_pair_t));
 		return 1;
 	}
-	int result = derive_child_key(pub_key, HARD_FLAG | 44, purpose_key); // m/44'
+	int result = derive_child_key(master_key, HARD_FLAG | 44, purpose_key); // m/44'
 	if (result != 0) {
 		fprintf(stderr, "Failed to derive purpose key\n");
 		zero_and_gcry_free((void *)purpose_key, sizeof(key_pair_t));
@@ -523,6 +528,31 @@ int derive_from_public_to_account(const key_pair_t *pub_key, uint32_t account_in
 	zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)purpose_key, (void *)coin_key, NULL);
 	return 0;
 } 
+
+int derive_from_master_to_coin(const key_pair_t *master_key, key_pair_t *coin_key) {
+	// Derive from public to account - m/44'/0'/0'/account
+	key_pair_t *purpose_key = NULL;
+	purpose_key = gcry_malloc_secure(sizeof(key_pair_t));
+	if (!purpose_key) {
+		fprintf(stderr, "Error gcry malloc for child key\n");
+		zero_and_gcry_free((void *)purpose_key, sizeof(key_pair_t));
+		return 1;
+	}
+	int result = derive_child_key(master_key, HARD_FLAG | 44, purpose_key); // m/44'
+	if (result != 0) {
+		fprintf(stderr, "Failed to derive purpose key\n");
+		zero_and_gcry_free((void *)purpose_key, sizeof(key_pair_t));
+		return 1;
+	}
+	result = derive_child_key(purpose_key, HARD_FLAG | 0, coin_key); // m/44'/0'
+	if (result != 0) {
+		fprintf(stderr, "Failed to derive coin key\n");
+		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)purpose_key, (void *)coin_key, NULL);
+		return 1;
+	}
+	zero_and_gcry_free((void *)purpose_key, sizeof(key_pair_t));
+	return 0;
+}
 
 int parse_json_for_any_transaction(char *json_data) {
 	json_error_t error;
@@ -619,7 +649,7 @@ long long get_account_balance(key_pair_t *master_key, uint32_t account_index, ti
 		gcry_free(addresses);
 		return -1;
 	}
-	result = derive_from_public_to_account(master_key, account_index, account_key); 
+	result = derive_from_master_to_account(master_key, account_index, account_key); 
 	if (result != 0) {
 		fprintf(stderr, "Failure deriving account key\n");
 		for (int j = 0; j < addr_count; j++) gcry_free(addresses[j]);
@@ -714,7 +744,7 @@ int scan_one_accounts_external_chain(key_pair_t *master_key, uint32_t account_in
 		gcry_free(addresses);
 		return -1;
 	}
-	int result = derive_from_public_to_account(master_key, account_index, child_key);
+	int result = derive_from_master_to_account(master_key, account_index, child_key);
 	if (result != 0) {
 		fprintf(stderr, "Error deriving child key\n");
 		for (int j = 0; j < addr_count; j++) gcry_free(addresses[j]);

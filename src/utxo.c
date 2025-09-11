@@ -199,7 +199,7 @@ long long get_utxos(key_pair_t *master_key, utxo_t **utxos, int *num_utxos, uint
 		gcry_free((void *)child_keys);
 		return -1;
 	}
-	result = derive_from_public_to_account(master_key, account_index, account_key); 
+	result = derive_from_master_to_account(master_key, account_index, account_key); 
 	if (result != 0) {
 		fprintf(stderr, "Failure deriving account key\n");
 		for (int j = 0; j < addr_count; j++) gcry_free((void *)addresses[j]);

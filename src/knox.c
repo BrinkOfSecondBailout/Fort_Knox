@@ -119,6 +119,7 @@ void print_commands() {
 	"- price					Most recent bitcoin price\n"
 	"- new					Create a new bitcoin wallet\n"
 	"- recover				Recover your bitcoin wallet with mnemonic words(& passphrase, if set)\n"
+	"- key					Serialize your master key (to self-backup), or account key (to import to watch-only wallets)\n"
 	"- balance				Display balance for all addresses in current wallet\n"
 	"- fee					Fetches the recommended fee rate from mempool.space\n"
 	"- receive				Receive bitcoin with a new address\n"
@@ -133,6 +134,7 @@ Command_Handler c_handlers[] = {
 	{ (char *)"price", price_handle},
 	{ (char *)"new", new_handle},
 	{ (char *)"recover", recover_handle},
+	{ (char *)"key", key_handle},
 	{ (char *)"balance", balance_handle},
 	{ (char *)"fee", fee_handle},
 	{ (char *)"receive", receive_handle},
@@ -455,6 +457,126 @@ int32 recover_handle(User *user) {
 	return 0;
 }
 
+int32 key_handle(User *user) {
+	if (!has_wallet(user)) {
+		printf("No wallet available for this command. Please generate a new wallet or recover your existing one.\n"
+		"Type 'new' or 'recover' to begin\n");
+		return 1;
+	}
+	printf("This function allows you to serialize your key in an easier-to-read format.\n"
+		"You can choose either your 'master' private key to serialize for backup (this does not substitute as your mnemnonic seed),\n"
+		"or your 'account' public key (to import into a watch-only wallet)\n");
+	char cmd[256];
+	while (1) {	
+		printf("Type 'master' or 'account' for the key you want > ");
+		zero((void *)cmd, 256);
+		if (!fgets(cmd, 256, stdin)) {
+			fprintf(stderr, "Failure reading user command\n");
+			return 1;
+		}
+		cmd[strlen(cmd) - 1] = '\0';
+		int j = 0;
+		while (cmd[j] != '\0') {
+			cmd[j] = tolower((unsigned char)cmd[j]);
+			j++;
+		}	
+		if (strcmp(cmd, "exit") == 0) exit_handle(user);
+		if (strcmp(cmd, "master") != 0 && strcmp(cmd, "account") != 0) {
+			fprintf(stderr, "Please type either 'master' or 'account'\n");
+		} else {
+			break;
+		}
+	}
+	int result;
+	char *output;
+	if (strcmp(cmd, "master") == 0) {
+		printf("Master private key it is, serializing now...\n");
+		result = serialize_extended_key(NULL, user->master_key, 1, &output);
+	} else {
+		printf("Account public key it is, serializing now...\n");
+		uint32_t account_index;
+		printf("What account do you want to use?\n"
+		"We recommend using account 0 as per the BIP44 standard, but enter any number you wish between 0 - 3.\n"
+		"We try to keep track of your used accounts for you, but you must also be responsible for them yourself\n"
+		"Some bitcoiners prefer keeping accounts separate for different purposes,\n"
+		"For ex: 0 for checkings, 1 for savings, 2 for donations, etc...\n"
+		"To keep this app simple, we limit the number of accounts you can use to 3.\n"
+		"Please keep in mind that your account selection must be sequential, starting from 0,\n"
+		"This means if you if you try to enter '1' but account '0' has zero transactions, we will alert you\n"
+		"that account 0 should be used instead.\n");
+		while (1) {
+			zero((void*)cmd, sizeof(cmd));
+			printf("Enter account number between 0-3: (recommended - 0) > ");
+			if (!fgets(cmd, sizeof(cmd), stdin)) {
+				fprintf(stderr, "fgets failure\n");
+				return 1;
+			}
+			cmd[strlen(cmd) - 1] = '\0';
+			int j = 0;
+			while (cmd[j] != '\0') {
+				cmd[j] = tolower((unsigned char)cmd[j]);
+				j++;
+			}
+			if (strcmp(cmd, "exit") == 0) exit_handle(user);
+			if (atoi(cmd) > 3) {
+				fprintf(stderr, "Maximum account index for this program is 3. Enter a number from 0 to 3.\n");
+			} else {
+				account_index = (uint32_t)atoi(cmd);
+				break;
+			}
+		}
+		if (account_index > 0) {
+			printf("Please wait while we query the blockchain to ensure previous accounts have already been used...\n");
+			// Ensure all accounts preceding it have been used
+			for (uint32_t index = 0; index < account_index; index++) {
+				result = scan_one_accounts_external_chain(user->master_key, index, &user->last_api_request);
+				if (result < 0) {
+					fprintf(stderr, "Error scanning previous accounts\n");
+					continue;
+				} else if (result == 0) {
+					printf("Since account %d is empty, we will use account %d to receive funds.\n", (int)index, (int)index);
+					account_index = index;
+					break;
+				} else {
+					continue;
+				}
+			}	
+		}
+printf("Account Index: %u\n", account_index);
+		key_pair_t *coin_key = gcry_malloc(sizeof(key_pair_t));
+		if (!coin_key) {
+			fprintf(stderr, "Error allocating\n");
+			return 1;
+		}
+		result = derive_from_master_to_coin(user->master_key, coin_key);
+		if (result != 0) {
+			fprintf(stderr, "Failure deriving coin key\n");
+			zero_and_gcry_free((void *)coin_key, sizeof(key_pair_t));
+			return 1;
+		}
+		key_pair_t *account_key = gcry_malloc(sizeof(key_pair_t));
+		if (!account_key) {
+			fprintf(stderr, "Error allocating\n");
+			zero_and_gcry_free((void *)coin_key, sizeof(key_pair_t));
+			return 1;
+		}
+		result = derive_child_key(coin_key, HARD_FLAG | account_index, account_key);
+		if (result != 0) {
+			fprintf(stderr, "Failure deriving account key\n");
+			zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)coin_key, (void *)account_key, NULL);
+			return 1;
+		}
+		result = serialize_extended_key(coin_key, account_key, 0, &output);
+	}
+	if (result != 0) {
+		fprintf(stderr, "Serialization error\n");
+		return 1;
+	}
+	printf("Here is your serialized Base58-encoded address, write it down and keep it safe! (do not take a picture or save it on a computer)\n\n");
+	printf(GREEN"%s\n\n"RESET, output);
+	return 0;
+}
+
 int32 balance_handle(User *user) {
 	if (!has_wallet(user)) {
 		printf("No wallet available for this command. Please generate a new wallet or recover your existing one.\n"
@@ -605,7 +727,7 @@ int32 receive_handle(User *user) {
 		fprintf(stderr, "Error gcry_malloc_secure\n");
 		return 1;
 	}
-	result = derive_from_public_to_account(user->master_key, account_index, account_key); // m/44'/0'/account'
+	result = derive_from_master_to_account(user->master_key, account_index, account_key); // m/44'/0'/account'
 	if (result != 0) {
 		fprintf(stderr, "Failed to derive account key\n");
 		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
@@ -816,7 +938,7 @@ int32 send_handle(User *user) {
 	}
 	if (change > 0) {
 		uint32_t change_index = account->used_indexes_count;
-		result = derive_from_public_to_account(user->master_key, account_index, change_back_key); 
+		result = derive_from_master_to_account(user->master_key, account_index, change_back_key); 
 		if (result != 0) {
 			fprintf(stderr, "Account key derivation failed\n");
 			for (int i = 0; i < num_utxos; i++) gcry_free(utxos[i].key);

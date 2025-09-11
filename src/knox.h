@@ -26,6 +26,7 @@ typedef struct {
 int32 price_handle(User *);
 int32 new_handle(User *);
 int32 recover_handle(User *);
+int32 key_handle(User *);
 int32 balance_handle(User *);
 int32 fee_handle(User *);
 int32 receive_handle(User *);
