@@ -542,7 +542,6 @@ int32 key_handle(User *user) {
 				}
 			}	
 		}
-printf("Account Index: %u\n", account_index);
 		key_pair_t *coin_key = gcry_malloc(sizeof(key_pair_t));
 		if (!coin_key) {
 			fprintf(stderr, "Error allocating\n");
@@ -968,7 +967,9 @@ int32 send_handle(User *user) {
 		account->used_indexes_count++;
 	}	
 	char *raw_tx_hex = NULL;
-	result = build_transaction(recipient, amount, &selected, num_selected, change_back_key, fee, &raw_tx_hex);
+	uint8_t *segwit_tx = NULL;
+	size_t segwit_len = 0;
+	result = build_transaction(recipient, amount, &selected, num_selected, change_back_key, fee, &raw_tx_hex, &segwit_tx, &segwit_len);
 	if (result != 0) {
 		fprintf(stderr, "Failure building transaction\n");
 		for (int i = 0; i < num_utxos; i++) gcry_free(utxos[i].key);
@@ -978,6 +979,19 @@ int32 send_handle(User *user) {
 		return 1;
 	}
 	printf("Successfully built transaction data\n");
+	if (!segwit_tx || segwit_len == 0) {
+		fprintf(stderr, "Failure creating transaction ID\n");
+		for (int i = 0; i < num_utxos; i++) gcry_free(utxos[i].key);
+		if (num_selected > 0) gcry_free(selected);
+		gcry_free(change_back_key);
+		gcry_free(utxos);
+		return 1;
+	}
+	// Create transaction ID
+	uint8_t txid[32];
+	double_sha256(segwit_tx, segwit_len, txid);
+	reverse_bytes(txid, 32);
+	// Sign
 	result = sign_transaction(&raw_tx_hex, &selected, num_selected);
 	if (result != 0) {
 		fprintf(stderr, "Failure signing transaction\n");
@@ -997,7 +1011,9 @@ int32 send_handle(User *user) {
 		gcry_free(utxos);
 		return 1;
 	}
-		
+	printf("This is your transaction ID, (in reverse byte order as per conventional blockchain explorers' standards) track it on the blockchain:\n");
+	print_bytes_as_hex("TXID", txid, 32);
+	
 	return 0;
 }
 

@@ -113,6 +113,15 @@ int bytes_to_hex(const uint8_t *data, size_t len, char *hex, size_t hex_len) {
     return 0;
 }
 
+void reverse_bytes(uint8_t *data, size_t len) {
+	if (!data || len == 0) return;
+	for (size_t i = 0; i < len / 2; i++) {
+		uint8_t temp = data[i];
+		data[i] = data[len - 1 - i];
+		data[len - 1 - i] = temp;
+	}
+}
+
 void print_seed_hashed(const uint8_t *seed, size_t len) {
 	unsigned char hash[32];
 	gcry_md_hash_buffer(GCRY_MD_SHA256, hash, seed, len);

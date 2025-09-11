@@ -339,7 +339,7 @@ int address_to_scriptpubkey(const char *address, uint8_t *script, size_t *script
 	return 0;
 }
 
-int build_transaction(const char *recipient, long long amount, utxo_t **selected, int num_selected, key_pair_t *change_back_key, long long fee, char **raw_tx_hex) {
+int build_transaction(const char *recipient, long long amount, utxo_t **selected, int num_selected, key_pair_t *change_back_key, long long fee, char **raw_tx_hex, uint8_t **segwit_tx, size_t *segwit_len) {
 	if (!recipient || amount <= 0 || !selected || num_selected <= 0 || fee < 0) {
 		fprintf(stderr, "Invalid inputs\n");
 		return 1;
@@ -459,6 +459,18 @@ int build_transaction(const char *recipient, long long amount, utxo_t **selected
 	// Locktime
 	encode_uint32_le(0, buffer + pos);
 	pos += 4;
+
+	// Save segwit transaction (without the marker and flag) for txid after signage
+	*segwit_len = pos - 2;
+	*segwit_tx = (uint8_t *)malloc(*segwit_len);
+	if (!*segwit_tx) {
+		fprintf(stderr, "Error allocating segwit_tx\n");
+		return 1;
+	}
+	memcpy(*segwit_tx, buffer, 4);
+	memcpy(*segwit_tx + 4, buffer + 6, pos - 6);
+print_bytes_as_hex("Segwit Tx", *segwit_tx, *segwit_len);
+
 	// Convert to hex
 	*raw_tx_hex = malloc(pos * 2 + 1);
 	if (!raw_tx_hex) {
@@ -473,7 +485,8 @@ int build_transaction(const char *recipient, long long amount, utxo_t **selected
 		fprintf(stderr, "Failed to convert buffer to hex\n");
 		return 1;
 	}
-	//printf("Raw Tx Hex: %s\n", raw_tx_hex);
+printf("Raw Tx Hex: %s\n", *raw_tx_hex);
+		
 	free(buffer);
 	return 0;
 }
@@ -780,7 +793,8 @@ int broadcast_transaction(char **raw_tx_hex, time_t *last_request) {
 	CURL *curl = curl_easy_init();
 	if (!curl) return -1;
 	printf("Broadcasting your transaction...\n");
-	char url[] = "https://0000000blockchain.info/pushtx";
+// Purposely wrong URL to not send real transaction yet, remove 00 when needed
+	char url[] = "https://00blockchain.info/pushtx";
 	char post_data[2048];
 	snprintf(post_data, sizeof(post_data), "tx=%s", *raw_tx_hex);
 	
