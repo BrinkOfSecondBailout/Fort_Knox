@@ -122,6 +122,17 @@ void reverse_bytes(uint8_t *data, size_t len) {
 	}
 }
 
+int is_s_low(const uint8_t *s, size_t s_len) {
+	uint8_t n_half[32] = {0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                          0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                          0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                          0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F};
+	if (s_len > 32) return 0;
+	uint8_t padded_s[32] = {0};
+	memcpy(padded_s + (32 - s_len), s, s_len);
+	return memcmp(padded_s, n_half, 32) <= 0;
+}
+
 void print_seed_hashed(const uint8_t *seed, size_t len) {
 	unsigned char hash[32];
 	gcry_md_hash_buffer(GCRY_MD_SHA256, hash, seed, len);

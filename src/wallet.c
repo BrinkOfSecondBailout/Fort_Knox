@@ -399,7 +399,7 @@ int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child
 		fprintf(stderr, "gcry_mpi_scan failure for IL: %s\n", gcry_strerror(err));
 		return 1;
 	}
- 	err = gcry_mpi_scan(&n_mpi, GCRYMPI_FMT_HEX, N_VALUE_HEX, 0, NULL);
+ 	err = gcry_mpi_scan(&n_mpi, GCRYMPI_FMT_HEX, CURVE_ORDER, 0, NULL);
 	if (err) { 
 		fprintf(stderr, "gcry_mpi_scan failure for n: %s\n", gcry_strerror(err));
 		return 1;

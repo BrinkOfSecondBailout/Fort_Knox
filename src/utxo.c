@@ -389,9 +389,12 @@ int build_transaction(const char *recipient, long long amount, utxo_t **selected
 		// TxId (reversed)
 		uint8_t txid_bytes[32];
 		hex_to_bytes((*selected)[i].txid, txid_bytes, 32);
-		for (int j = 0; j < 32; j++) {
-			buffer[pos + j] = txid_bytes[31 - j];
-		}
+		//reverse_bytes(txid_bytes, 32);
+		memcpy(buffer + pos, txid_bytes, 32);
+		//for (int j = 0; j < 32; j++) {
+		//	buffer[pos + j] = txid_bytes[31 - j];
+		//}
+print_bytes_as_hex("TXID (reversed) of UTXO", buffer + pos, 32);
 		pos += 32;
 		// vout
 		encode_uint32_le((*selected)[i].vout, buffer + pos);
@@ -491,14 +494,22 @@ printf("Raw Tx Hex: %s\n", *raw_tx_hex);
 	return 0;
 }
 
-int construct_scriptcode(uint8_t *pubkeyhash, char *scriptcode) {
-	if (!pubkeyhash) {
+int construct_scriptcode(uint8_t *pubkeyhash, uint8_t *scriptcode, size_t scriptcode_len) {
+	if (!pubkeyhash || scriptcode_len != 26) {
 		fprintf(stderr, "Invalid inputs\n");
 		return 1;
 	}
-	strcpy(scriptcode, "1976a914");
-	bytes_to_hex(pubkeyhash, 20, scriptcode + 8, 41);
-	strcat(scriptcode, "88ac");
+	size_t pos = 0;
+	scriptcode[0] = 0x19;
+	scriptcode[1] = 0x76;
+	scriptcode[2] = 0xa9;
+	scriptcode[3] = 0x14;
+	pos += 4;
+	memcpy(scriptcode + pos, pubkeyhash, 20);
+	pos += 20;
+	scriptcode[pos] = 0x88;
+	scriptcode[pos + 1] = 0xac;
+	pos += 2;
 	return 0;
 }
 
@@ -594,7 +605,7 @@ int construct_preimage(uint8_t *tx_data, size_t tx_len, utxo_t **selected, int n
 	encode_uint32_le(SIGHASH_ALL, sighash_type);
 	// Prepare preimage = 
 	// version + hash256(inputs) + hash256(sequences) + (num_inputs * (input(txid + vout)) + scriptcode + amount + sequence) + hash256(outputs) + locktime	
-	size_t preimage_len = 4 + 32 + 32 + ((36 + 25 + 8 + 4) * num_inputs) + 32 + 4 + 4; 
+	size_t preimage_len = 4 + 32 + 32 + ((36 + 26 + 8 + 4) * num_inputs) + 32 + 4 + 4; 
 	uint8_t *preimage = malloc(preimage_len);
 	if (!preimage) {
 		free(tx_data);
@@ -625,16 +636,14 @@ int construct_preimage(uint8_t *tx_data, size_t tx_len, utxo_t **selected, int n
 			fprintf(stderr, "Error extracting pub key hash\n");
 			return 1;		
 		}
-		char scriptcode[50];
-		if (construct_scriptcode(pubkeyhash, scriptcode) != 0) {
+		uint8_t scriptcode[26];
+		if (construct_scriptcode(pubkeyhash, scriptcode, 26) != 0) {
 			free(tx_data);
 			fprintf(stderr, "Error constructing scriptcode\n");
 			return 1;
 		}
-		uint8_t scriptcode_bytes[25];
-		hex_to_bytes(scriptcode, scriptcode_bytes, 25);
-		memcpy(preimage + preimage_pos, scriptcode_bytes, 25);
-		preimage_pos += 25;
+		memcpy(preimage + preimage_pos, scriptcode, 26);
+		preimage_pos += 26;
 		// Amount
 		uint8_t amount[8];
 		encode_uint64_le((*selected)[i].amount, amount);
@@ -664,70 +673,107 @@ int sign_preimage_hash(uint8_t *sighash, uint8_t *privkey, uint8_t *witness, siz
 		fprintf(stderr, "Input errors\n");
 		return 1;
 	}
-	uint8_t encoded_sig[72];
+	uint8_t encoded_sig[73]; // 72 + 1 byte for sighash
 	size_t sig_len = 0;
 	// Sign with private key
 	gcry_sexp_t priv_sexp, data_sexp, sig_sexp;
 	gcry_error_t err;
-	err = gcry_sexp_build(&priv_sexp, NULL, "(private-key (ecc (curve secp256k1) (d %b)))", PRIVKEY_LENGTH, privkey);
-	if (err) {
-		fprintf(stderr, "Failed to build priv_sexp: %s\n", gcry_strerror(err));
-		return 1;
-	}
-	err = gcry_sexp_build(&data_sexp, NULL, "(data (flags raw) (hash-algo sha256) (value %b))", 32, sighash);
-	if (err) {
+	int retries = 0;
+	const int max_retries = 10;
+	// Loop until we get a low-S
+	do {
+		printf("Attempt %d/%d\n", retries, max_retries);
+		err = gcry_sexp_build(&priv_sexp, NULL, "(private-key (ecc (curve secp256k1) (d %b)))", PRIVKEY_LENGTH, privkey);
+		if (err) {
+			fprintf(stderr, "Failed to build priv_sexp: %s\n", gcry_strerror(err));
+			return 1;
+		}
+		err = gcry_sexp_build(&data_sexp, NULL, "(data (flags raw) (hash-algo sha256) (value %b))", 32, sighash);
+		if (err) {
+			gcry_sexp_release(priv_sexp);
+			fprintf(stderr, "Failed to build data_sexp: %s\n", gcry_strerror(err));
+			return 1;
+		}
+		err = gcry_pk_sign(&sig_sexp, data_sexp, priv_sexp);
+		if (err) {
+			gcry_sexp_release(data_sexp);
+			gcry_sexp_release(priv_sexp);
+			fprintf(stderr, "Failed to sign: %s\n", gcry_strerror(err));
+			retries++;
+			continue;
+		}
+		gcry_sexp_t r, s;
+		r = gcry_sexp_find_token(sig_sexp, "r", 0);
+		s = gcry_sexp_find_token(sig_sexp, "s", 0);
+		if (!r || !s) {
+			gcry_sexp_release(sig_sexp);
+			gcry_sexp_release(data_sexp);
+			gcry_sexp_release(priv_sexp);
+			fprintf(stderr, "Failed to find r or s in signature\n");
+			retries++;
+			continue;
+		}
+		size_t r_len, s_len;
+		const void *r_data = gcry_sexp_nth_data(r, 1, &r_len);
+		const void *s_data = gcry_sexp_nth_data(s, 1, &s_len);
+		if (!r_data || !s_data || r_len > 33 || s_len > 33) {
+			gcry_sexp_release(r);
+			gcry_sexp_release(s);
+			gcry_sexp_release(sig_sexp);
+			gcry_sexp_release(data_sexp);
+			gcry_sexp_release(priv_sexp);
+			fprintf(stderr, "Invalid r or s data\n");
+			retries++;
+			continue;
+		}
+		// Check for low-S
+		int low_s = is_s_low(s_data, s_len);
+		if (!low_s) {
+			gcry_sexp_release(r);
+			gcry_sexp_release(s);
+			gcry_sexp_release(sig_sexp);
+			gcry_sexp_release(data_sexp);
+			gcry_sexp_release(priv_sexp);
+			fprintf(stderr, "High S value detected (retry %d)\n", retries);
+			retries++;
+			continue;
+		}
+print_bytes_as_hex("R", r_data, r_len);
+print_bytes_as_hex("S", s_data, s_len);
+		// DER encode the signature
+		encoded_sig[0] = 0x30;
+		encoded_sig[1] = r_len + s_len + 4;
+		encoded_sig[2] = 0x02;
+		encoded_sig[3] = r_len + 1;
+		//encoded_sig[4] = 0x00; // Prepend this to the R to prevent it from being interpreted as a negative value
+		memcpy(4 + encoded_sig, r_data, r_len);
+		encoded_sig[4 + r_len] = 0x02;
+		encoded_sig[5 + r_len] = s_len;
+		memcpy(6 + encoded_sig + r_len, s_data, s_len);
+		// Append signature hash type
+		encoded_sig[6 + r_len + s_len] = 0x01;
+		// Calculate total encoded sig len
+		sig_len = 7 + r_len + s_len;
 		gcry_sexp_release(priv_sexp);
-		fprintf(stderr, "Failed to build data_sexp: %s\n", gcry_strerror(err));
-		return 1;
-	}
-	err = gcry_pk_sign(&sig_sexp, data_sexp, priv_sexp);
-	if (err) {
-		gcry_sexp_release(data_sexp);
-		gcry_sexp_release(priv_sexp);
-		fprintf(stderr, "Failed to sign: %s\n", gcry_strerror(err));
-		return 1;
-	}
-
-	gcry_sexp_t r, s;
-	r = gcry_sexp_find_token(sig_sexp, "r", 0);
-	s = gcry_sexp_find_token(sig_sexp, "s", 0);
-	if (!r || !s) {
 		gcry_sexp_release(sig_sexp);
 		gcry_sexp_release(data_sexp);
-		gcry_sexp_release(priv_sexp);
-		fprintf(stderr, "Failed to find r or s in signature\n");
-		return 1;
-	}
-	size_t r_len, s_len;
-	const void *r_data = gcry_sexp_nth_data(r, 1, &r_len);
-	const void *s_data = gcry_sexp_nth_data(s, 1, &s_len);
-	// DER encode the signature
-	encoded_sig[0] = 0x30;
-	encoded_sig[1] = r_len + s_len + 4;
-	encoded_sig[2] = 0x02;
-	encoded_sig[3] = r_len;
-	memcpy(4 + encoded_sig, r_data, r_len);
-	encoded_sig[4 + r_len] = 0x02;
-	encoded_sig[5 + r_len] = s_len;
-	memcpy(6 + encoded_sig + r_len, s_data, s_len);
-	// Append signature hash type
-	encoded_sig[6 + r_len + s_len] = 0x01;
-	// Calculate total encoded sig len
-	sig_len = 7 + r_len + s_len;
-	//encoded_sig[sig_len] = '\0';
-	gcry_sexp_release(priv_sexp);
-	gcry_sexp_release(sig_sexp);
-	gcry_sexp_release(r);
-	gcry_sexp_release(s);
-	// Construct full witness
-	witness[0] = 0x02;
-	witness[1] = sig_len;
+		gcry_sexp_release(r);
+		gcry_sexp_release(s);
+print_bytes_as_hex("Signature with sighash", encoded_sig, sig_len);
+		// Construct full witness
+		witness[0] = 0x02;
+		witness[1] = sig_len;
 
-	memcpy(2 + witness, encoded_sig, sig_len);
-	witness[2 + sig_len] = PUBKEY_LENGTH;
-	memcpy(3 + witness + sig_len, pubkey, PUBKEY_LENGTH);
-	*witness_len = 3 + sig_len + PUBKEY_LENGTH;
-	return 0;
+		memcpy(2 + witness, encoded_sig, sig_len);
+		witness[2 + sig_len] = PUBKEY_LENGTH;
+		memcpy(3 + witness + sig_len, pubkey, PUBKEY_LENGTH);
+		*witness_len = 3 + sig_len + PUBKEY_LENGTH;
+print_bytes_as_hex("Witness", witness, *witness_len);
+		return 0;
+	} while (retries < max_retries);
+
+	fprintf(stderr, "Max retries exceeded for low-S signature\n");
+	return 1;
 }
 
 int sign_transaction(char **raw_tx_hex, utxo_t **selected, int num_selected) {
@@ -794,7 +840,7 @@ int broadcast_transaction(char **raw_tx_hex, time_t *last_request) {
 	if (!curl) return -1;
 	printf("Broadcasting your transaction...\n");
 // Purposely wrong URL to not send real transaction yet, remove 00 when needed
-	char url[] = "https://00blockchain.info/pushtx";
+	char url[] = "https://blockchain.info/pushtx";
 	char post_data[2048];
 	snprintf(post_data, sizeof(post_data), "tx=%s", *raw_tx_hex);
 	
@@ -819,6 +865,7 @@ int broadcast_transaction(char **raw_tx_hex, time_t *last_request) {
 		free(buffer.data);
 		return -1;
 	}
+printf("Response: %s\n", buffer.data);
 	// Check response for success
 	if (strstr(buffer.data, "Transaction Submitted") == NULL) {
 		free(buffer.data);

@@ -17,6 +17,7 @@ void resize_convert_hex_to_bytes(const char *, uint8_t *);
 void print_bytes_as_hex(const char *, const uint8_t *, size_t);
 int bytes_to_hex(const uint8_t *, size_t, char *, size_t);
 void reverse_bytes(uint8_t *, size_t);
+int is_s_low(const uint8_t *, size_t);
 void print_seed_hashed(const uint8_t *, size_t);
 void print_master_priv_key_hashed(const uint8_t *, size_t);
 void print_bits(const char *, const uint8_t *, size_t);
