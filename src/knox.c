@@ -23,7 +23,10 @@ void print_logo() {
 	printf("***This is a HOT wallet built by one developer you should not 'trust', as per the bitcoin ethos***\n");
 	printf("***Exercise extreme cautions. Only TINY (if any) amounts of sats should be sent to any wallet derived by this app***\n"
 		"***Until much further rigorous testings and verifications***\n"
-		"***Any funds sent to a wallet address derived from this app could be lost forever***\n");
+		"***Any funds sent to a wallet address derived from this app could be lost forever***\n\n"
+		"This wallet uses BIP84 derivation path: m/84'/0'/0'/0/0 (Native Segwit P2WPKH),\n"
+		"its public addresses will always start with 'bc1q'.\n");
+
 	printf("\n...and so with that being said...\n\n");
 	printf(GREEN"\n'Wake up Neo...'\n"RESET);
 	return;
@@ -495,7 +498,9 @@ int32 key_handle(User *user) {
 	} else {
 		printf("Account public key it is, serializing now...\n");
 		uint32_t account_index;
-		printf("What account do you want to use?\n"
+		printf("What account do you want to use?\n\n"
+		"Keep in mind that this wallet uses the derivation path of BIP84, which is: m/84'/0'/0'/0/0,\n"
+		"meaning this is a Native Segwit (P2WPKH) account, its public addresses will always start with 'bc1q'.\n"
 		"We recommend using account 0 as per the BIP44 standard, but enter any number you wish between 0 - 3.\n"
 		"We try to keep track of your used accounts for you, but you must also be responsible for them yourself\n"
 		"Some bitcoiners prefer keeping accounts separate for different purposes,\n"
@@ -587,7 +592,9 @@ int32 balance_handle(User *user) {
 		"This means the balance queried will reflect only of your selected account (up to index 20 of each account).\n"
 		"Note: if you have funds in a different account index or if one of your address\n"
 		"key index is higher than 20 you will not see those funds reflected in this balance.\n"
-		"This does not necessarily mean that the funds aren't in your wallet associated with your seed phrase, however.\n");
+		"This does not necessarily mean that the funds aren't in your wallet associated with your seed phrase, however.\n"
+		"Reminded: This wallet uses BIP84 derivation path: m/84'/0'/0'/0/0 (Native Segwit P2WPKH),\n"
+		"its public addresses will always start with 'bc1q'.\n");
 	char cmd[256];
 	uint32_t account_index;
 	while(1) {
@@ -675,7 +682,10 @@ int32 receive_handle(User *user) {
 		"To keep this app simple, we limit the number of accounts you can use to 3.\n"
 		"Please keep in mind that your account selection must be sequential, starting from 0,\n"
 		"This means if you if you try to enter '1' but account '0' has zero transactions, we will alert you\n"
-		"that account 0 should be used instead.\n");
+		"that account 0 should be used instead.\n"
+		"Reminded: This wallet uses BIP84 derivation path: m/84'/0'/0'/0/0 (Native Segwit P2WPKH),\n"
+		"its addresses will always start with 'bc1q'.\n");
+
 	while (1) {
 		zero((void*)cmd, sizeof(cmd));
 		printf("Enter account number between 0-3: (recommended - 0) > ");
@@ -719,14 +729,14 @@ int32 receive_handle(User *user) {
 		fprintf(stderr, "Failure adding account\n");
 		return 1;
 	}
-	// Work our way down the path to m/44'/0'/0'/account
+	// Work our way down the path to m/84'/0'/0'/account
 	key_pair_t *account_key;
 	account_key = gcry_malloc_secure(sizeof(key_pair_t));
 	if (!account_key) {
 		fprintf(stderr, "Error gcry_malloc_secure\n");
 		return 1;
 	}
-	result = derive_from_master_to_account(user->master_key, account_index, account_key); // m/44'/0'/account'
+	result = derive_from_master_to_account(user->master_key, account_index, account_key); // m/84'/0'/account'
 	if (result != 0) {
 		fprintf(stderr, "Failed to derive account key\n");
 		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
@@ -789,7 +799,10 @@ int32 send_handle(User *user) {
 		"This means the UTXOs queried will reflect only of your selected account (up to index 20 of each account).\n"
 		"Note: if you have funds in a different account index or if one of your address\n"
 		"key index is higher than 20 you will not see those funds reflected in this UTXOs query.\n"
-		"This does not necessarily mean that the funds aren't in your wallet associated with your seed phrase, however.\n");
+		"This does not necessarily mean that the funds aren't in your wallet associated with your seed phrase, however.\n"
+		"Reminded: This wallet uses BIP84 derivation path: m/84'/0'/0'/0/0 (Native Segwit P2WPKH),\n"
+		"its public addresses will always start with 'bc1q'.\n");
+
 	char cmd[256];
 	uint32_t account_index;
 	int result;

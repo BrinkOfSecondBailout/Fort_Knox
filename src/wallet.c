@@ -16,7 +16,7 @@ int serialize_extended_key(key_pair_t *parent, key_pair_t *extended, int private
 	uint8_t serialized_data[82];
 	size_t data_len = 0;
 	// Version bytes (mainnet xpriv or xpub)
-	uint8_t version[4] = {0x04, 0x88, private ? 0xad : 0xb2, private ? 0xe4 : 0x1e };
+	uint8_t version[4] = {0x04, 0xb2, private ? 0x43 : 0x47, private ? 0x0c : 0x46 };
 	memcpy(serialized_data, version, 4);
 	data_len += 4;
 	// Depth
@@ -462,8 +462,8 @@ int generate_address(const uint8_t *key_pub_compressed, char *address, size_t ad
 }
 
 int derive_from_change_to_child(const key_pair_t *change_key, uint32_t child_index, key_pair_t *child_key) {
-	// Derive from change to child - m/44'/0'/0'/account/change/index
-	int result = derive_child_key(change_key, child_index, child_key); // m/44'/0'/account'/change/index
+	// Derive from change to child - m/84'/0'/0'/account/change/index
+	int result = derive_child_key(change_key, child_index, child_key); // m/84'/0'/account'/change/index
 	if (result != 0) {
 		fprintf(stderr, "Failed to derive index key\n");
 		return -1;
@@ -472,8 +472,8 @@ int derive_from_change_to_child(const key_pair_t *change_key, uint32_t child_ind
 }
 
 int derive_from_account_to_change(const key_pair_t *account_key, uint32_t change_index, key_pair_t *change_key) {
-	// Derive from account to change - m/44'/0'/0'/account/change/
-	int result = derive_child_key(account_key, change_index, change_key); // m'/44'/0'/account'/change	
+	// Derive from account to change - m/84'/0'/0'/account/change/
+	int result = derive_child_key(account_key, change_index, change_key); // m'/84'/0'/account'/change	
 	if (result != 0) {
 		fprintf(stderr, "Failure deriving child key\n");
 		return -1;
@@ -482,7 +482,7 @@ int derive_from_account_to_change(const key_pair_t *account_key, uint32_t change
 }
 
 int derive_from_master_to_account(const key_pair_t *master_key, uint32_t account_index, key_pair_t *account_key) {
-	// Derive from public to account - m/44'/0'/0'/account
+	// Derive from public to account - m/84'/0'/0'/account
 	key_pair_t *purpose_key = NULL;
 	purpose_key = gcry_malloc_secure(sizeof(key_pair_t));
 	if (!purpose_key) {
@@ -490,7 +490,7 @@ int derive_from_master_to_account(const key_pair_t *master_key, uint32_t account
 		zero_and_gcry_free((void *)purpose_key, sizeof(key_pair_t));
 		return 1;
 	}
-	int result = derive_child_key(master_key, HARD_FLAG | 44, purpose_key); // m/44'
+	int result = derive_child_key(master_key, HARD_FLAG | 84, purpose_key); // m/84'
 	if (result != 0) {
 		fprintf(stderr, "Failed to derive purpose key\n");
 		zero_and_gcry_free((void *)purpose_key, sizeof(key_pair_t));
@@ -503,14 +503,14 @@ int derive_from_master_to_account(const key_pair_t *master_key, uint32_t account
 		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)purpose_key, (void *)coin_key, NULL);
 		return 1;
 	}
-	result = derive_child_key(purpose_key, HARD_FLAG | 0, coin_key); // m/44'/0'
+	result = derive_child_key(purpose_key, HARD_FLAG | 0, coin_key); // m/84'/0'
 	if (result != 0) {
 		fprintf(stderr, "Failed to derive coin key\n");
 		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)purpose_key, (void *)coin_key, NULL);
 		return 1;
 	}
 	
-	result = derive_child_key(coin_key, HARD_FLAG | account_index, account_key); // m/44'/0'/account'
+	result = derive_child_key(coin_key, HARD_FLAG | account_index, account_key); // m/84'/0'/account'
 	if (result != 0) {
 		fprintf(stderr, "Failed to derive account 0 key\n");
 		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)purpose_key, (void *)coin_key, NULL);
@@ -521,7 +521,7 @@ int derive_from_master_to_account(const key_pair_t *master_key, uint32_t account
 } 
 
 int derive_from_master_to_coin(const key_pair_t *master_key, key_pair_t *coin_key) {
-	// Derive from public to account - m/44'/0'/0'/account
+	// Derive from public to account - m/84'/0'/0'/account
 	key_pair_t *purpose_key = NULL;
 	purpose_key = gcry_malloc_secure(sizeof(key_pair_t));
 	if (!purpose_key) {
@@ -529,13 +529,13 @@ int derive_from_master_to_coin(const key_pair_t *master_key, key_pair_t *coin_ke
 		zero_and_gcry_free((void *)purpose_key, sizeof(key_pair_t));
 		return 1;
 	}
-	int result = derive_child_key(master_key, HARD_FLAG | 44, purpose_key); // m/44'
+	int result = derive_child_key(master_key, HARD_FLAG | 84, purpose_key); // m/84'
 	if (result != 0) {
 		fprintf(stderr, "Failed to derive purpose key\n");
 		zero_and_gcry_free((void *)purpose_key, sizeof(key_pair_t));
 		return 1;
 	}
-	result = derive_child_key(purpose_key, HARD_FLAG | 0, coin_key); // m/44'/0'
+	result = derive_child_key(purpose_key, HARD_FLAG | 0, coin_key); // m/84'/0'
 	if (result != 0) {
 		fprintf(stderr, "Failed to derive coin key\n");
 		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)purpose_key, (void *)coin_key, NULL);
@@ -659,7 +659,7 @@ long long get_account_balance(key_pair_t *master_key, uint32_t account_index, ti
 			zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
 			return -1;
 		}
-		result = derive_from_account_to_change(account_key, change, change_key); // m'/44'/0'/account'/change	
+		result = derive_from_account_to_change(account_key, change, change_key); // m'/84'/0'/account'/change	
 		if (result != 0) {
 			fprintf(stderr, "Failure deriving child key\n");
 			for (int j = 0; j < addr_count; j++) gcry_free(addresses[j]);
@@ -678,7 +678,7 @@ long long get_account_balance(key_pair_t *master_key, uint32_t account_index, ti
 				zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
 				return -1;
 			}
-			result = derive_from_change_to_child(change_key, child_index, child_key); // m/44'/0'/account'/change/index
+			result = derive_from_change_to_child(change_key, child_index, child_key); // m/84'/0'/account'/change/index
 			if (result != 0) {
 				fprintf(stderr, "Failed to derive child key\n");
 				for (int k = 0; k < addr_count; k++) gcry_free(addresses[k]);
