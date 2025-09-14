@@ -510,6 +510,11 @@ int construct_scriptcode(uint8_t *pubkeyhash, uint8_t *scriptcode, size_t script
 	scriptcode[pos] = 0x88;
 	scriptcode[pos + 1] = 0xac;
 	pos += 2;
+	if (pos != 26) {
+		fprintf(stderr, "Failure constructing scriptcode\n");
+		return 1;
+	}
+print_bytes_as_hex("ScriptCode", scriptcode, 26);
 	return 0;
 }
 
@@ -581,6 +586,7 @@ int construct_preimage(uint8_t *tx_data, size_t tx_len, utxo_t **selected, int n
 	for (int i = 0; i < num_outputs; i++) {
 		// Amount (8 bytes)
 		memcpy(outputs_serialized + outputs_pos, tx_data + pos, 8);
+print_bytes_as_hex("Output Amount", outputs_serialized + outputs_pos, 8);
 		outputs_pos += 8;
 		pos += 8;
 		// Script length (1 byte)
@@ -613,23 +619,29 @@ int construct_preimage(uint8_t *tx_data, size_t tx_len, utxo_t **selected, int n
 		return 1;
 	}
 	size_t preimage_pos = 0;
-	// Version
+	// Version --REUSABLE
 	memcpy(preimage + preimage_pos, version, 4);
+printf("PREHASH IMAGE:\n");
+print_bytes_as_hex("Version", preimage + preimage_pos, 4);
 	preimage_pos += 4;
-	// HashPrevouts
+	// HashPrevouts --REUSABLE
 	memcpy(preimage + preimage_pos, hash_prevouts, 32);
+print_bytes_as_hex("HashPrevouts", preimage + preimage_pos, 32);
 	preimage_pos += 32;
-	// HashSequence
+	// HashSequence --REUSABLE
 	memcpy(preimage + preimage_pos, hash_sequence, 32);
+print_bytes_as_hex("HashSequence", preimage + preimage_pos, 32);
 	preimage_pos += 32;
 	for (int i = 0; i < num_inputs; i++) {
+printf("Outpoint (AKA Inputs)\n");
 		// Outpoint (txid + vout per input)
 		uint8_t outpoint[36];
-		memcpy(outpoint, tx_data + 6, 32); // TxID
-		memcpy(outpoint + 32, tx_data + 38, 4); // vout
+		memcpy(outpoint, tx_data + 7, 32); // TxID
+		memcpy(outpoint + 32, tx_data + 39, 4); // Vout
 		memcpy(preimage + preimage_pos, outpoint, 36);
+print_bytes_as_hex("TXID + VOUT", preimage + preimage_pos, 36);
 		preimage_pos += 36;
-		// ScriptCode (P2PKH format: 1976a914<hash>88ac)
+		// ScriptCode (P2WPKH format: 1976a914<hash>88ac)
 		uint8_t pubkeyhash[20];
 		if (key_to_pubkeyhash((*selected)[i].key, pubkeyhash) != 0) {
 			free(tx_data);
@@ -643,27 +655,35 @@ int construct_preimage(uint8_t *tx_data, size_t tx_len, utxo_t **selected, int n
 			return 1;
 		}
 		memcpy(preimage + preimage_pos, scriptcode, 26);
+print_bytes_as_hex("Scriptcode", preimage + preimage_pos, 26);
 		preimage_pos += 26;
 		// Amount
 		uint8_t amount[8];
 		encode_uint64_le((*selected)[i].amount, amount);
 		memcpy(preimage + preimage_pos, amount, 8);
+print_bytes_as_hex("Input amount", preimage + preimage_pos, 8);
 		preimage_pos += 8;
 		// Sequence
-		memcpy(preimage + preimage_pos, tx_data + 43, 4); 
+		memcpy(preimage + preimage_pos, tx_data + 44, 4); 
+print_bytes_as_hex("Sequence", preimage + preimage_pos, 4);
 		preimage_pos += 4;
 	}
-	// HashOutputs
+	// HashOutputs --REUSABLE
 	memcpy(preimage + preimage_pos, hash_outputs, 32);
+print_bytes_as_hex("HashOutputs", preimage + preimage_pos, 32);
 	preimage_pos += 32;
-	// Locktime
+	// Locktime --REUSABLE
 	memcpy(preimage + preimage_pos, locktime, 4);
+print_bytes_as_hex("Locktime", preimage + preimage_pos, 4);
 	preimage_pos += 4;
 	// Add sig hash type at the end
 	memcpy(preimage + preimage_pos, sighash_type, 4);
+print_bytes_as_hex("Sighash", preimage + preimage_pos, 4);
 	preimage_pos += 4;
-	// Sighash type
+print_bytes_as_hex("Preimage", preimage, preimage_pos);
+	// Hash256 the entire preimage
 	double_sha256(preimage, preimage_pos, sighash);
+print_bytes_as_hex("Message (Hashed Preimage)", sighash, 32);
 	free(preimage);
 	return 0; 
 }
@@ -673,107 +693,176 @@ int sign_preimage_hash(uint8_t *sighash, uint8_t *privkey, uint8_t *witness, siz
 		fprintf(stderr, "Input errors\n");
 		return 1;
 	}
-	uint8_t encoded_sig[73]; // 72 + 1 byte for sighash
-	size_t sig_len = 0;
 	// Sign with private key
 	gcry_sexp_t priv_sexp, data_sexp, sig_sexp;
 	gcry_error_t err;
-	int retries = 0;
-	const int max_retries = 10;
-	// Loop until we get a low-S
-	do {
-		printf("Attempt %d/%d\n", retries, max_retries);
-		err = gcry_sexp_build(&priv_sexp, NULL, "(private-key (ecc (curve secp256k1) (d %b)))", PRIVKEY_LENGTH, privkey);
-		if (err) {
-			fprintf(stderr, "Failed to build priv_sexp: %s\n", gcry_strerror(err));
-			return 1;
-		}
-		err = gcry_sexp_build(&data_sexp, NULL, "(data (flags raw) (hash-algo sha256) (value %b))", 32, sighash);
-		if (err) {
-			gcry_sexp_release(priv_sexp);
-			fprintf(stderr, "Failed to build data_sexp: %s\n", gcry_strerror(err));
-			return 1;
-		}
-		err = gcry_pk_sign(&sig_sexp, data_sexp, priv_sexp);
-		if (err) {
-			gcry_sexp_release(data_sexp);
-			gcry_sexp_release(priv_sexp);
-			fprintf(stderr, "Failed to sign: %s\n", gcry_strerror(err));
-			retries++;
-			continue;
-		}
-		gcry_sexp_t r, s;
-		r = gcry_sexp_find_token(sig_sexp, "r", 0);
-		s = gcry_sexp_find_token(sig_sexp, "s", 0);
-		if (!r || !s) {
-			gcry_sexp_release(sig_sexp);
-			gcry_sexp_release(data_sexp);
-			gcry_sexp_release(priv_sexp);
-			fprintf(stderr, "Failed to find r or s in signature\n");
-			retries++;
-			continue;
-		}
-		size_t r_len, s_len;
-		const void *r_data = gcry_sexp_nth_data(r, 1, &r_len);
-		const void *s_data = gcry_sexp_nth_data(s, 1, &s_len);
-		if (!r_data || !s_data || r_len > 33 || s_len > 33) {
-			gcry_sexp_release(r);
-			gcry_sexp_release(s);
-			gcry_sexp_release(sig_sexp);
-			gcry_sexp_release(data_sexp);
-			gcry_sexp_release(priv_sexp);
-			fprintf(stderr, "Invalid r or s data\n");
-			retries++;
-			continue;
-		}
-		// Check for low-S
-		int low_s = is_s_low(s_data, s_len);
-		if (!low_s) {
-			gcry_sexp_release(r);
-			gcry_sexp_release(s);
-			gcry_sexp_release(sig_sexp);
-			gcry_sexp_release(data_sexp);
-			gcry_sexp_release(priv_sexp);
-			fprintf(stderr, "High S value detected (retry %d)\n", retries);
-			retries++;
-			continue;
-		}
-print_bytes_as_hex("R", r_data, r_len);
-print_bytes_as_hex("S", s_data, s_len);
-		// DER encode the signature
-		encoded_sig[0] = 0x30;
-		encoded_sig[1] = r_len + s_len + 4;
-		encoded_sig[2] = 0x02;
-		encoded_sig[3] = r_len + 1;
-		//encoded_sig[4] = 0x00; // Prepend this to the R to prevent it from being interpreted as a negative value
-		memcpy(4 + encoded_sig, r_data, r_len);
-		encoded_sig[4 + r_len] = 0x02;
-		encoded_sig[5 + r_len] = s_len;
-		memcpy(6 + encoded_sig + r_len, s_data, s_len);
-		// Append signature hash type
-		encoded_sig[6 + r_len + s_len] = 0x01;
-		// Calculate total encoded sig len
-		sig_len = 7 + r_len + s_len;
+	err = gcry_sexp_build(&priv_sexp, NULL, "(private-key (ecc (curve secp256k1) (d %b)))", PRIVKEY_LENGTH, privkey);
+	if (err) {
+		fprintf(stderr, "Failed to build priv_sexp: %s\n", gcry_strerror(err));
+		return 1;
+	}
+	err = gcry_sexp_build(&data_sexp, NULL, "(data (flags raw) (hash-algo sha256) (value %b))", 32, sighash);
+	if (err) {
 		gcry_sexp_release(priv_sexp);
+		fprintf(stderr, "Failed to build data_sexp: %s\n", gcry_strerror(err));
+		return 1;
+	}
+	err = gcry_pk_sign(&sig_sexp, data_sexp, priv_sexp);
+	if (err) {
+		gcry_sexp_release(data_sexp);
+		gcry_sexp_release(priv_sexp);
+		fprintf(stderr, "Failed to sign: %s\n", gcry_strerror(err));
+		return 1;
+	}
+	gcry_sexp_t r, s;
+	r = gcry_sexp_find_token(sig_sexp, "r", 0);
+	s = gcry_sexp_find_token(sig_sexp, "s", 0);
+	if (!r || !s) {
 		gcry_sexp_release(sig_sexp);
 		gcry_sexp_release(data_sexp);
+		gcry_sexp_release(priv_sexp);
+		fprintf(stderr, "Failed to find r or s in signature\n");
+		return 1;
+	}
+	size_t r_len, s_len;
+	const void *r_data = gcry_sexp_nth_data(r, 1, &r_len);
+	const void *s_data = gcry_sexp_nth_data(s, 1, &s_len);
+	if (!r_data || !s_data || r_len > 33 || s_len > 32) {
 		gcry_sexp_release(r);
 		gcry_sexp_release(s);
+		gcry_sexp_release(sig_sexp);
+		gcry_sexp_release(data_sexp);
+		gcry_sexp_release(priv_sexp);
+		fprintf(stderr, "Invalid r or s data\n");
+		return 1;
+	}
+	// Check for low-S
+	uint8_t s_final[32];
+	int low_s = is_s_low(s_data, s_len);
+	if (!low_s) {
+		printf("High S value detected, replacing S with N - S\n");
+		const uint8_t curve_order_n[32] = {
+		    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+		    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE,
+		    0xBA, 0xAE, 0xDC, 0xE6, 0xAF, 0x48, 0xA0, 0x3B,
+		    0xBF, 0xD2, 0x5E, 0x8C, 0xD0, 0x36, 0x41, 0x41
+		};
+		gcry_mpi_t s_mpi, n_mpi, result_mpi;
+		s_mpi = gcry_mpi_set_ui(NULL, 0);
+		n_mpi = gcry_mpi_set_ui(NULL, 0);
+		result_mpi = gcry_mpi_set_ui(NULL, 0);
+		gcry_mpi_scan(&s_mpi, GCRYMPI_FMT_USG, s_data, s_len, NULL);
+		gcry_mpi_scan(&n_mpi, GCRYMPI_FMT_USG, curve_order_n, 32, NULL);
+
+		// Compute n - s
+		gcry_mpi_sub(result_mpi, n_mpi, s_mpi);
+
+		// Convert result back to bytes
+		gcry_mpi_print(GCRYMPI_FMT_USG, s_final, 32, &s_len, result_mpi);
+		if (s_len > 32) {
+		    gcry_mpi_release(s_mpi);
+		    gcry_mpi_release(n_mpi);
+		    gcry_mpi_release(result_mpi);
+		    gcry_sexp_release(r);
+		    gcry_sexp_release(s);
+		    gcry_sexp_release(sig_sexp);
+		    gcry_sexp_release(data_sexp);
+		    gcry_sexp_release(priv_sexp);
+		    fprintf(stderr, "Computed s value too large\n");
+		    return 1;
+		}
+		// Pad with leading zeros if necessary
+		if (s_len < 32) {
+			memmove(s_final + (32 - s_len), s_final, s_len);
+			memset(s_final, 0, 32 - s_len);
+			s_len = 32;
+		}
+		gcry_mpi_release(s_mpi);
+		gcry_mpi_release(n_mpi);
+		gcry_mpi_release(result_mpi);
+	} else {
+		memcpy(s_final, s_data, s_len);
+		if (s_len < 32) {
+			memmove(s_final + (32 - s_len), s_final, s_len);
+			memset(s_final, 0, 32 - s_len);
+			s_len = 32;
+		}	
+	}
+
+print_bytes_as_hex("R", r_data, r_len);
+print_bytes_as_hex("S", s_final, s_len);
+	
+	// Strip leading zeros for canon DER
+	size_t r_len_stripped = r_len;
+	const uint8_t *r_data_stripped = r_data;
+	while (r_len_stripped > 0 && *r_data_stripped == 0 && r_len_stripped > 1) {
+		r_data_stripped++;
+		r_len_stripped--;
+	}
+	// Add leading zero if high bit is set (avoid negative)
+	int r_needs_zero = (r_len_stripped > 0 && (*r_data_stripped & 0x80) != 0);
+	
+	size_t s_len_stripped = s_len;
+	const uint8_t *s_data_stripped = s_final;
+	while (s_len_stripped > 0 && *s_data_stripped == 0 && s_len_stripped > 1) {
+		s_data_stripped++;
+		s_len_stripped--;
+	}
+	int s_needs_zero = (s_len_stripped > 0 && (*s_data_stripped & 0x80) != 0);		
+
+	// DER encode the signature
+	uint8_t encoded_sig[74]; // 2 + 1 + 33 + 1 + 32 + 1
+	size_t sig_len = 0;
+	size_t pos = 0;
+	encoded_sig[pos++] = 0x30;
+	size_t content_len = 2 + r_len_stripped + 2 + s_len_stripped; // exclude sighash type
+	if (r_needs_zero) content_len++;
+	if (s_needs_zero) content_len++;
+	encoded_sig[pos++] = content_len;
+	// R
+	encoded_sig[pos++] = 0x02;
+	encoded_sig[pos++] = r_needs_zero ? r_len_stripped + 1 : r_len_stripped;
+	if (r_needs_zero) encoded_sig[pos++] = 0x00;
+	memcpy(encoded_sig + pos, r_data_stripped, r_len_stripped);
+	pos += r_len_stripped;
+	// S
+	encoded_sig[pos++] = 0x02;
+	encoded_sig[pos++] = s_needs_zero ? s_len_stripped + 1 : s_len_stripped;
+	if (s_needs_zero) encoded_sig[pos++] = 0x00;
+	memcpy(encoded_sig + pos, s_data_stripped, s_len_stripped);
+	pos += s_len_stripped;
+	// Append signature hash type
+	encoded_sig[pos++] = 0x01;
+	// Calculate total encoded sig len
+	sig_len = pos;
+	if (sig_len > 72) {
+		fprintf(stderr, "Signature higher than 72 bytes, too large.\n");
+		gcry_sexp_release(r);
+		gcry_sexp_release(s);
+		gcry_sexp_release(sig_sexp);
+		gcry_sexp_release(data_sexp);
+		gcry_sexp_release(priv_sexp);
+		return 1;
+	}
+	gcry_sexp_release(priv_sexp);
+	gcry_sexp_release(sig_sexp);
+	gcry_sexp_release(data_sexp);
+	gcry_sexp_release(r);
+	gcry_sexp_release(s);
+printf("Sig Len: %zu\n", sig_len);
 print_bytes_as_hex("Signature with sighash", encoded_sig, sig_len);
-		// Construct full witness
-		witness[0] = 0x02;
-		witness[1] = sig_len;
-
-		memcpy(2 + witness, encoded_sig, sig_len);
-		witness[2 + sig_len] = PUBKEY_LENGTH;
-		memcpy(3 + witness + sig_len, pubkey, PUBKEY_LENGTH);
-		*witness_len = 3 + sig_len + PUBKEY_LENGTH;
+	// Construct full witness
+	pos = 0;
+	witness[pos++] = 0x02; // Stack items
+	witness[pos++] = sig_len;
+	memcpy(witness + pos, encoded_sig, sig_len);
+	pos += sig_len;
+	witness[pos++] = PUBKEY_LENGTH;
+	memcpy(witness + pos, pubkey, PUBKEY_LENGTH);
+	pos += PUBKEY_LENGTH;
+	*witness_len = pos;
 print_bytes_as_hex("Witness", witness, *witness_len);
-		return 0;
-	} while (retries < max_retries);
-
-	fprintf(stderr, "Max retries exceeded for low-S signature\n");
-	return 1;
+	return 0;
 }
 
 int sign_transaction(char **raw_tx_hex, utxo_t **selected, int num_selected) {
@@ -800,7 +889,7 @@ int sign_transaction(char **raw_tx_hex, utxo_t **selected, int num_selected) {
 	// Append witnesses
 	size_t witness_pos = tx_len - 4; // Append at end (before locktime)
 	// Reallocate to larger array for witness(es)
-	size_t new_tx_len = tx_len + (num_selected * 108) - 1; // Approx. witness size
+	size_t new_tx_len = tx_len + (num_selected * 108); // Maximum witness size
 	uint8_t *new_tx_data = (uint8_t *)realloc(tx_data, new_tx_len);
 	if (!new_tx_data) {
 		free(tx_data);
@@ -808,7 +897,7 @@ int sign_transaction(char **raw_tx_hex, utxo_t **selected, int num_selected) {
 		return 1;
 	}
 	for (int i = 0; i < num_selected; i++) {
-		uint8_t witness[108];
+		uint8_t witness[108]; // 72 for signature, 33 for pubkey, 3 extra description bytes
 		size_t witness_len = 0;
 		if (sign_preimage_hash(sighash, (*selected)[i].key->key_priv, witness, &witness_len, (*selected)[i].key->key_pub_compressed) != 0) {
 			fprintf(stderr, "Failure to sign preimage hash\n");
