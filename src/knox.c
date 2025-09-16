@@ -915,6 +915,35 @@ int32 send_handle(User *user) {
 			break;
 		}
 	}
+	int rbf = 0;
+	while (1) {
+		zero((void *)cmd, 256);
+		printf("Do you want this transaction to be RBF-enabled?\n\n",
+			"(Replace-By-Fee: by having this enabled, you can later 'replace' the transaction in the mempool by doubling\n"
+			"the fee-rate of the original transaction, essentially 'speeding up' how fast it ends up in the next block\n"
+			"by incentivizing miners with a higher fee.)\nType 'yes' or 'no'> "); 
+		if (!fgets(cmd, 256, stdin)) {
+			fprintf(stderr, "Error reading command\n");
+			continue;
+		}
+		cmd[strlen(cmd) - 1] = '\0';
+		int i = 0;
+		while (cmd[i] != '\0') {
+			cmd[i] = tolower((unsigned char)cmd[i]);
+			i++;
+		}
+		if (strcmp(cmd, "exit") == 0) exit_handle(user);
+		if ((strcmp(cmd, "yes") != 0) && (strcmp(cmd, "no") != 0)) {
+			printf("\nInvalid answer, must type 'yes' or 'no'\n");
+		} else if (strcmp(cmd, "yes") == 0) {
+			rbf = 1;
+			printf("RBF will be enabled.\n");
+			break;
+		} else if (strcmp(cmd, "no") == 0) {
+			printf("RBF not enabled.\n");
+			break;
+		}	
+	}
 	utxo_t *selected = NULL;
 	int num_selected = 0;
 	long long input_sum = 0;
@@ -982,7 +1011,7 @@ int32 send_handle(User *user) {
 	char *raw_tx_hex = NULL;
 	uint8_t *segwit_tx = NULL;
 	size_t segwit_len = 0;
-	result = build_transaction(recipient, amount, &selected, num_selected, change_back_key, fee, &raw_tx_hex, &segwit_tx, &segwit_len);
+	result = build_transaction(recipient, amount, &selected, num_selected, change_back_key, fee, &raw_tx_hex, &segwit_tx, &segwit_len, rbf);
 	if (result != 0) {
 		fprintf(stderr, "Failure building transaction\n");
 		for (int i = 0; i < num_utxos; i++) gcry_free(utxos[i].key);

@@ -339,7 +339,7 @@ int address_to_scriptpubkey(const char *address, uint8_t *script, size_t *script
 	return 0;
 }
 
-int build_transaction(const char *recipient, long long amount, utxo_t **selected, int num_selected, key_pair_t *change_back_key, long long fee, char **raw_tx_hex, uint8_t **segwit_tx, size_t *segwit_len) {
+int build_transaction(const char *recipient, long long amount, utxo_t **selected, int num_selected, key_pair_t *change_back_key, long long fee, char **raw_tx_hex, uint8_t **segwit_tx, size_t *segwit_len, int rbf) {
 	if (!recipient || amount <= 0 || !selected || num_selected <= 0 || fee < 0) {
 		fprintf(stderr, "Invalid inputs\n");
 		return 1;
@@ -402,7 +402,7 @@ print_bytes_as_hex("TXID (reversed) of UTXO", buffer + pos, 32);
 		// ScriptSig (empty for P2WPKWH)
 		buffer[pos++] = 0x00;
 		// Sequence
-		encode_uint32_le(0xffffffff, buffer + pos);
+		encode_uint32_le(rbf ? 0xfffffffd : 0xffffffff, buffer + pos);
 		pos += 4;
 	}
 	// Output count
@@ -489,7 +489,6 @@ print_bytes_as_hex("Segwit Tx", *segwit_tx, *segwit_len);
 		return 1;
 	}
 printf("Raw Tx Hex: %s\n", *raw_tx_hex);
-		
 	free(buffer);
 	return 0;
 }
