@@ -127,6 +127,7 @@ void print_commands() {
 	"- fee					Fetches the recommended fee rate from mempool.space\n"
 	"- receive				Receive bitcoin with a new address\n"
 	"- send					Send bitcoin to an address\n"
+	"- rbf					Broadcast a new Replace-By-Fee transaction\n" 
 	"- help					Safety practices, tips, and educational contents\n"
 	"- menu					Show all commands\n"
 	"- exit					Exit program\n\n");
@@ -142,6 +143,7 @@ Command_Handler c_handlers[] = {
 	{ (char *)"fee", fee_handle},
 	{ (char *)"receive", receive_handle},
 	{ (char *)"send", send_handle},
+	{ (char *)"rbf", rbf_handle},
 	{ (char *)"help", help_handle},
 	{ (char *)"menu", menu_handle},
 	{ (char *)"exit", exit_handle}
@@ -660,8 +662,8 @@ int32 fee_handle(User *user) {
 		"A transaction of 2 inputs and 2 outputs is about 374 bytes. (very common)\n",
 		regular_rate, regular_rate / SATS_PER_BTC,
 		priority_rate, priority_rate / SATS_PER_BTC,
-		regular_rate * (long long)estimated_transaction_size(1, 2),
-		priority_rate * (long long)estimated_transaction_size(1, 2));
+		regular_rate * (long long)estimate_transaction_size(1, 2),
+		priority_rate * (long long)estimate_transaction_size(1, 2));
 	return 0;
 }
 
@@ -891,8 +893,8 @@ int32 send_handle(User *user) {
 		"%lld\n",
 		regular_rate, regular_rate / SATS_PER_BTC,
 		priority_rate, priority_rate / SATS_PER_BTC,
-		regular_rate * (long long)estimated_transaction_size(1, 2),
-		priority_rate * (long long)estimated_transaction_size(1, 2));
+		regular_rate * (long long)estimate_transaction_size(1, 2),
+		priority_rate * (long long)estimate_transaction_size(1, 2));
 	printf("\nHow much would you like to spend on fees?\n"
 		"Keep in mind, the higher you spend, the faster your transaction will be added to the next block.\n"
 		"If you choose the regular fee rate, confirmation time will be ~1 hour.\n"
@@ -918,7 +920,7 @@ int32 send_handle(User *user) {
 	int rbf = 0;
 	while (1) {
 		zero((void *)cmd, 256);
-		printf("Do you want this transaction to be RBF-enabled?\n\n",
+		printf("Do you want to mark this transaction as RBF-enabled?\n\n"
 			"(Replace-By-Fee: by having this enabled, you can later 'replace' the transaction in the mempool by doubling\n"
 			"the fee-rate of the original transaction, essentially 'speeding up' how fast it ends up in the next block\n"
 			"by incentivizing miners with a higher fee.)\nType 'yes' or 'no'> "); 
@@ -1055,6 +1057,111 @@ int32 send_handle(User *user) {
 	}
 	printf("This is your transaction ID, (in reverse byte order as per conventional blockchain explorers' standards) track it on the blockchain:\n");
 	print_bytes_as_hex("TXID", txid, 32);
+	
+	return 0;
+}
+
+int32 rbf_handle(User *user) {
+	if (!has_wallet(user)) {
+		printf("No wallet available for this command. Please generate a new wallet or recover your existing one.\n"
+		"Type 'new' or 'recover' to begin\n");
+		return 1;
+	}
+	printf("This feature requires that you have a previous Replace-By-Fee enabled transaction currently in the mempool.\n"
+		"By sending a new transaction with 2x the previous transaction's feerate, you will incentivize miners\n"
+		"to be much more likely to include it into the next block.\n");
+	char cmd[256];
+	while (1) {
+		zero((void *)cmd, 256);
+		printf("Do you have an RBF-enabled transaction currently in the mempool?\nType 'yes' or 'no' > ");
+		if (!fgets(cmd, 256, stdin)) {
+			fprintf(stderr, "Error reading command\n");
+			continue;
+		}
+		cmd[strlen(cmd) - 1] = '\0';
+		int i = 0;
+		while (cmd[i] != '\0') {
+			cmd[i] = tolower((unsigned char)cmd[i]);
+			i++;
+		}	
+		if (strcmp(cmd, "exit") == 0) exit_handle(user);
+		if ((strcmp(cmd, "yes") != 0) && (strcmp(cmd, "no") != 0)) {
+			printf("\nInvalid answer, must type 'yes' or 'no'\n");
+		} else if (strcmp(cmd, "yes") == 0) {
+			printf("Got it. Let's begin building a new transaction with double the previous fee.\n");
+			break;
+		} else if (strcmp(cmd, "no") == 0) {
+			printf("This feature requires an existing RBF-enabled transaction. Try sending a new transaction with RBF on first.\n");
+			return 0;
+		}
+	}
+	printf("Please provide the transaction ID of the unconfirmed RBF-enabled tx in the mempool you'd like to replace.\n");
+	char tx_id[256];
+	while (1) {
+		printf("TxID > ");
+		zero((void *)tx_id, 256);
+		if (!fgets(tx_id, 256, stdin)) {
+			fprintf(stderr, "Error reading command\n");
+			return 1;
+		}
+		tx_id[strlen(tx_id) - 1] = '\0';
+		if (strlen(tx_id) != 64) {
+			fprintf(stderr, "Transaction ID must be 64 hexadecimal characters (32 bytes). Try again.\n");
+			continue;	
+		} else {
+			printf("Got it! Querying mempool for transaction ID %s...\n", tx_id);	
+			break;
+		}
+	}
+	rbf_data_t *rbf_data = malloc(sizeof(rbf_data_t));
+	if (check_rbf_transaction(tx_id, rbf_data, &user->last_api_request) != 0) {
+		fprintf(stderr, "Unable to fetch transaction\n");
+		return 1;	
+	}
+	if (rbf_data->unconfirmed == 0) {
+		fprintf(stderr, "This transaction is already confirmed.\n");
+		return 1;
+	}
+	printf("Found unconfirmed transaction\n");
+	if (fetch_raw_tx_hex(tx_id, rbf_data, &user->last_api_request) != 0) {
+		fprintf(stderr, "Unable to fetch raw transaction hex data\n");
+		return 1;
+	}
+	long long new_fee;
+	long long change_amount;
+	if (calculate_rbf_fee(rbf_data, 2, &user->last_api_request, &new_fee, &change_amount) != 0) {
+		fprintf(stderr, "Failure calculating RBF fee\n");
+		return 1;
+	}
+	while (1) {
+		printf("The new fee amount is %lld sats. Proceed?\nType 'yes' or 'no' (or 'exit' to quit) > ", new_fee);
+		zero((void *)cmd, 256);
+		if (!fgets(cmd, 256, stdin)) {
+			fprintf(stderr, "Error reading command\n");
+			return 1;
+		}
+		cmd[strlen(cmd) - 1] = '\0';
+		int i = 0;
+		while (cmd[i] != '\0') {
+			cmd[i] = tolower((unsigned char)cmd[i]);
+			i++;
+		}
+		if (strcmp(cmd, "exit") == 0) exit_handle(user);
+		if (strcmp(cmd, "yes") == 0) {
+			printf("Got it, let's proceed.\n");
+			break;
+		} else if (strcmp(cmd, "no") == 0) {
+			printf("Okay, cancelling RBF transaction.\n");
+			return 1;
+		} else {
+			fprintf(stderr, "Invalid response, 'yes', 'no', or 'exit' only\n");
+			continue;
+		}
+	}
+	if (build_rbf_transaction(rbf_data, new_fee, change_amount) != 0) {
+		fprintf(stderr, "Failure building RBF transaction\n");
+		return 1;
+	}	
 	
 	return 0;
 }

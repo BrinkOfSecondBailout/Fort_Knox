@@ -105,12 +105,21 @@ void print_bytes_as_hex(const char *label, const uint8_t *data, size_t len) {
     	printf("\n");
 }
 
-int bytes_to_hex(const uint8_t *data, size_t len, char *hex, size_t hex_len) {
+void bytes_to_hex(const uint8_t *data, size_t len, char *hex, size_t hex_len) {
     for (size_t i = 0; i < len; i++) {
         sprintf(hex + i * 2, "%02x", data[i]);
     }
     hex[len * 2] = '\0';
-    return 0;
+    return;
+}
+
+void reverse_hex(char *hex, size_t len) {
+	if (!hex || len == 0) return;
+	uint8_t bytes[32];
+	hex_to_bytes(hex, bytes, 32);
+	reverse_bytes(bytes, 32);
+	bytes_to_hex(bytes, 32, hex, len);
+	return;
 }
 
 void reverse_bytes(uint8_t *data, size_t len) {
@@ -284,9 +293,9 @@ int bech32_decode(const char *address, uint8_t *program, size_t *program_len) {
 	return 0;
 }
 
-// Variable length integers
+// Variable length integers encoding
 int encode_varint(uint64_t value, uint8_t *buffer, size_t *len) {
-	if (value < 0xFD) { // < 253 inputs or outputs
+	if (value < 0xFD) { // < 253 inputs or outputs (most common)
 		buffer[0] = (uint8_t)value;
 		*len = 1;
 	} else if (value <= 0xFFFF) { // 253 to 65535
@@ -294,7 +303,15 @@ int encode_varint(uint64_t value, uint8_t *buffer, size_t *len) {
 		buffer[1] = value & 0xFF;
 		buffer[2] = (value >> 8) & 0xFF;
 		*len = 3;
-	} else {
+	} else if (value <= 0xFFFFFFFF) { // 65536 - 4294967295
+		buffer[0] = 0xFE;
+		buffer[1] = value & 0xFF;
+		buffer[2] = (value >> 8) & 0xFF;
+		buffer[3] = (value >> 16) & 0xFF;
+		buffer[4] = (value >> 24) & 0xFF;
+		*len = 5;
+	} else { // larger than 4294967295 is overkill for bitcoin
+		fprintf(stderr, "Value too large for bitcoin development.\n");
 		return 1;
 	}
 	return 0;

@@ -3,6 +3,7 @@
 #include <curl/curl.h>
 #include "query.h"
 #include "wallet.h"
+#include "crypt.h"
 #include "hash.h"
 
 // Matching the parameters prototype of how curl expects their callback function
@@ -113,11 +114,11 @@ int init_curl_and_addresses(const char **addresses, int num_addresses, curl_buff
 	return 0;
 }
 
-int estimated_transaction_size(int num_inputs, int num_outputs) {
+int estimate_transaction_size(int num_inputs, int num_outputs) {
 	// Non-witness data
-	int non_witness = 4 + 2 + 1 + num_inputs * 40 + 1 + num_outputs * 33 + 4;
+	int non_witness = 4 + 2 + 1 + 1 + (num_inputs * 41) + (num_outputs * 33) + 4;
 	// Witness data (discounted by 1/4 for SegWit)
-	double witness = num_inputs * 107.0 / 4.0;
+	double witness = num_inputs * 108.0 / 4.0;
 	return (int)ceil(non_witness + witness);
 }
 
@@ -138,23 +139,353 @@ int get_fee_rate(long long *regular_rate, long long *priority_rate, time_t *last
 	free(buffer.data);
 	if (!root) {
 		fprintf(stderr, "JSON parse error: %s\n", error.text);
-		return -1;
+		return 1;
 	}
 	json_t *priority = json_object_get(root, "fastestFee");
 	if (!json_is_integer(priority)) {
 		fprintf(stderr, "Unable to find priority fee rate in JSON\n");
 		json_decref(root);
-		return -1;
+		return 1;
 	}
 	json_t *regular = json_object_get(root, "hourFee");
 	if (!json_is_integer(regular)) {
 		fprintf(stderr, "Unable to find regular fee rate in JSON\n");
 		json_decref(root);
-		return -1;
+		return 1;
 	}
 	*regular_rate = (long long)json_integer_value(regular);
 	*priority_rate = (long long)json_integer_value(priority);
 	json_decref(root);
 	return 0;
 }
+
+int fetch_raw_tx_hex(char *tx_id, rbf_data_t *rbf_data, time_t *last_request) {
+	if (!tx_id || !rbf_data) {
+		fprintf(stderr, "Invalid inputs\n");
+		return 1;
+	}
+	CURL *curl = NULL;
+	int result = init_curl(&curl);
+	if (result != 0) {
+		fprintf(stderr, "Curl init failure\n");
+		return 1;
+	}
+	char url[2048];
+	snprintf(url, sizeof(url), "https://mempool.space/api/tx/%s/hex", tx_id);
+	curl_buffer_t buffer = {0};
+	result = set_curl_run_curl(curl, url, &buffer, last_request);
+	if (result != 0) return 1;
+	
+	if (buffer.size < 10 || !buffer.data) {
+		fprintf(stderr, "Invalid raw transaction hex\n");
+		free(buffer.data);
+		return 1;
+	}	
+	rbf_data->raw_tx_hex = buffer.data;
+printf("Raw TX: %s\n", rbf_data->raw_tx_hex);
+	return 0;
+}
+
+int check_rbf_transaction(char *tx_id, rbf_data_t *rbf_data, time_t *last_request) {
+	if (!tx_id) {
+		fprintf(stderr, "Invalid inputs\n");
+		return 1;
+	}
+	CURL *curl = NULL;
+	int result = init_curl(&curl);
+	if (result != 0) {
+		fprintf(stderr, "Curl init failure\n");
+		return 1;
+	}
+	char url[2048];
+	snprintf(url, sizeof(url), "https://mempool.space/api/tx/%s", tx_id);
+	curl_buffer_t buffer = {0};
+	result = set_curl_run_curl(curl, url, &buffer, last_request);
+	if (result != 0) return 1;
+	
+	json_error_t error;
+	json_t *root = json_loads(buffer.data, 0, &error);
+	free(buffer.data);
+	if (!root) {
+		fprintf(stderr, "JSON parse error: %s\n", error.text);
+		return 1;
+	}
+	// Check if confirmed
+	json_t *status = json_object_get(root, "status");
+	json_t *confirmed = json_object_get(status, "confirmed");
+	rbf_data->unconfirmed = json_is_false(confirmed) ? 1 : 0;
+printf("Unconfirmed: %d\n", rbf_data->unconfirmed);
+	strncpy(rbf_data->txid, tx_id, 64);
+	reverse_hex(rbf_data->txid, 64);
+printf("TxId(reversed): %s\n", rbf_data->txid);
+	// Num of inputs
+	json_t *vin = json_object_get(root, "vin");
+	if (json_is_array(vin)) {
+		rbf_data->num_inputs = json_array_size(vin);
+	} else {
+		fprintf(stderr, "Unable to read num of inputs\n");
+		return 1;
+	}
+printf("Num Inputs: %d\n", rbf_data->num_inputs);
+	// Num of outputs
+	json_t *vout = json_object_get(root, "vout");
+	if (json_is_array(vout)) {
+		rbf_data->num_outputs = json_array_size(vout);
+	} else {
+		fprintf(stderr, "Unable to read num of outputs\n");
+		return 1;
+	}
+
+printf("Num Outputs: %d\n", rbf_data->num_outputs);
+	// Fee
+	json_t *fee = json_object_get(root, "fee");
+	if (json_is_integer(fee)) {
+		rbf_data->fee = json_integer_value(fee);
+	} else {
+		fprintf(stderr, "Unable to read fee\n");
+		return 1;
+	}
+printf("Total Fee: %lld sats\n", rbf_data->fee);
+	return 0;
+}
+
+int parse_json_for_any_transaction(char *json_data) {
+	json_error_t error;
+	json_t *root = json_loads(json_data, 0, &error);
+	if (!root) {
+		fprintf(stderr, "JSON parse error: %s\n", error.text);
+		return -1;
+	}
+	json_t *addresses_array = json_object_get(root, "addresses");
+	if (json_is_array(addresses_array)) {
+		for (size_t i = 0; i < json_array_size(addresses_array); i++) {
+			json_t *addr_obj = json_array_get(addresses_array, i);
+			json_t *n_tx = json_object_get(addr_obj, "n_tx");
+			if (json_is_integer(n_tx)) {
+				int n = json_integer_value(n_tx);
+				if (n > 0) {
+					json_decref(root);
+					return 1;
+				}
+			}
+		}
+	}
+	json_decref(root);
+	return 0;
+}
+
+long long parse_json_for_total_balance(char *json_data) {
+	// Parse JSON for total balance
+	long long total_balance = 0;
+	json_error_t error;
+	json_t *root = json_loads(json_data, 0, &error);
+	if (!root) {
+		fprintf(stderr, "JSON parse error: %s\n", error.text);
+		return -1;
+	}
+	json_t *addresses_array = json_object_get(root, "addresses");
+	if (json_is_array(addresses_array)) {
+		for (size_t i = 0; i < json_array_size(addresses_array); i++) {
+			json_t *addr_obj = json_array_get(addresses_array, i);
+			json_t *balance = json_object_get(addr_obj, "final_balance");
+			if (json_is_integer(balance)) {
+				total_balance += json_integer_value(balance);
+			}
+		}
+	}
+	json_decref(root);
+	return total_balance;
+}
+
+// Get total balance for a list of addresses (in satoshis)
+long long get_balance(const char **addresses, int num_addresses, time_t *last_request) {
+	printf("Querying the blockchain for 20 Bech32-P2WPKH address indexes (external and internal chain) associated with this wallet account...\n");
+	if (*addresses[0] == '\0' || num_addresses == 0) {
+		fprintf(stderr, "Addresses invalid.\n");
+		return -1;
+	}
+	curl_buffer_t buffer = {0};
+	int result = init_curl_and_addresses(addresses, num_addresses, &buffer, last_request);
+	if (result != 0) {
+		fprintf(stderr, "Failed to initialize curl and addresses\n");
+		return -1;
+	}
+	long long balance = parse_json_for_total_balance(buffer.data);
+	free(buffer.data);
+	return balance;
+}
+
+long long get_account_balance(key_pair_t *master_key, uint32_t account_index, time_t *last_request) {
+	char **addresses = NULL;
+	addresses = gcry_malloc_secure(GAP_LIMIT * 2 * sizeof(char *));
+	if (!addresses) {
+		fprintf(stderr, "Failed to allocate addresses array\n");
+		return -1;
+	}
+	for (size_t i = 0; i < GAP_LIMIT * 2; i++) {
+		// Allocate each of the 40 addresses and NULL it
+		char *address = (char *)gcry_malloc_secure(sizeof(char) * ADDRESS_MAX_LEN);
+		if (address == NULL) {
+			for (int j = 0; j < i; j++) gcry_free(addresses[j]);
+			gcry_free(addresses);
+			fprintf(stderr, "Error allocating address\n");
+			return -1;
+		}
+		address[0] = '\0';
+		addresses[i] = address;
+	}
+	int addr_count = 0;
+	int result;
+	key_pair_t *account_key = NULL;
+	account_key = gcry_malloc_secure(sizeof(key_pair_t));
+	if (!account_key) {
+		fprintf(stderr, "Error gcry_malloc_secure\n");
+		for (int j = 0; j < addr_count; j++) gcry_free(addresses[j]);
+		gcry_free(addresses);
+		return -1;
+	}
+	result = derive_from_master_to_account(master_key, account_index, account_key); 
+	if (result != 0) {
+		fprintf(stderr, "Failure deriving account key\n");
+		for (int j = 0; j < addr_count; j++) gcry_free(addresses[j]);
+		gcry_free(addresses);
+		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
+		return -1;
+	}
+	for (uint32_t change = 0; change < 2; change++) { // 0 for external, 1 for internal
+		// Generate the change (chain)
+		key_pair_t *change_key = NULL;
+		change_key = gcry_malloc_secure(sizeof(key_pair_t));
+		if (!change_key) {
+			fprintf(stderr, "Error gcry_malloc_secure\n");
+			for (int j = 0; j < addr_count; j++) gcry_free(addresses[j]);
+			gcry_free(addresses);
+			zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
+			return -1;
+		}
+		result = derive_from_account_to_change(account_key, change, change_key); // m'/84'/0'/account'/change	
+		if (result != 0) {
+			fprintf(stderr, "Failure deriving child key\n");
+			for (int j = 0; j < addr_count; j++) gcry_free(addresses[j]);
+			gcry_free(addresses);
+			zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
+			return -1;
+		}
+		// For each change (chain), go through all the indexes
+		for (uint32_t child_index = 0; child_index < (uint32_t) GAP_LIMIT; child_index++) {
+			key_pair_t *child_key = NULL;
+			child_key = gcry_malloc_secure(sizeof(key_pair_t));
+			if (!child_key) {
+				fprintf(stderr, "Error gcry_malloc_secure\n");
+				for (int k = 0; k < addr_count; k++) gcry_free(addresses[k]);
+				gcry_free(addresses);
+				zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
+				return -1;
+			}
+			result = derive_from_change_to_child(change_key, child_index, child_key); // m/84'/0'/account'/change/index
+			if (result != 0) {
+				fprintf(stderr, "Failed to derive child key\n");
+				for (int k = 0; k < addr_count; k++) gcry_free(addresses[k]);
+				gcry_free(addresses);
+				zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);
+				return -1;
+			}
+			result = pubkey_to_address(child_key->key_pub_compressed, PUBKEY_LENGTH, addresses[addr_count], ADDRESS_MAX_LEN);
+			if (result != 0) {
+				fprintf(stderr, "Failed to generate address\n");
+				for (int k = 0; k < addr_count; k++) gcry_free(addresses[k]);
+				gcry_free(addresses);
+				zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);
+				return -1;
+			}
+			addr_count++;
+			zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
+		}
+		zero_and_gcry_free((void *)change_key, sizeof(key_pair_t));
+	}
+	zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
+    	long long balance = get_balance((const char **)addresses, addr_count, last_request);
+    	for (int k = 0; k < addr_count; k++) gcry_free(addresses[k]);
+    	gcry_free(addresses);
+	return balance;		
+}
+
+int scan_one_accounts_external_chain(key_pair_t *master_key, uint32_t account_index, time_t *last_request) {
+	char **addresses = NULL;
+	int addr_count = 0;
+	addresses = gcry_malloc_secure(GAP_LIMIT * sizeof(char *));
+	if (!addresses) {
+		fprintf(stderr, "Failed to allocate addresses array\n");
+		return -1;
+	}
+	for (int i = 0; i < GAP_LIMIT; i++) {
+		// Allocate each of the 40 addresses and NULL it
+		char *address = (char *)gcry_malloc_secure(sizeof(char) * ADDRESS_MAX_LEN);
+		if (address == NULL) {
+			for (int j = 0; j < i; j++) gcry_free(addresses[j]);
+			gcry_free(addresses);
+			fprintf(stderr, "Error allocating address\n");
+			return -1;
+		}
+		address[0] = '\0';
+		addresses[i] = address;
+	}
+
+	key_pair_t *child_key = NULL;
+	child_key = gcry_malloc_secure(sizeof(key_pair_t));
+	if (!child_key) {
+		fprintf(stderr, "Failure allocating child key\n");
+		for (int j = 0; j < addr_count; j++) gcry_free(addresses[j]);
+		gcry_free(addresses);
+		return -1;
+	}
+	int result = derive_from_master_to_account(master_key, account_index, child_key);
+	if (result != 0) {
+		fprintf(stderr, "Error deriving child key\n");
+		for (int j = 0; j < addr_count; j++) gcry_free(addresses[j]);
+		gcry_free(addresses);
+		zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
+		return -1;
+	}
+	result = derive_from_account_to_change(child_key, (uint32_t)0, child_key);
+	if (result != 0) {
+		fprintf(stderr, "Error deriving child key\n");
+		for (int j = 0; j < addr_count; j++) gcry_free(addresses[j]);
+		gcry_free(addresses);
+		zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
+		return -1;
+	}
+	for (uint32_t index = 0; index < (uint32_t)GAP_LIMIT; index++) {
+		result = derive_from_change_to_child(child_key, index, child_key);
+		if (result != 0) {
+			fprintf(stderr, "Error deriving child key\n");
+			for (int j = 0; j < addr_count; j++) gcry_free(addresses[j]);
+			gcry_free(addresses);
+			zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
+			return -1;
+		}
+		result = pubkey_to_address(child_key->key_pub_compressed, PUBKEY_LENGTH, addresses[addr_count], ADDRESS_MAX_LEN);
+		if (result != 0) {
+			fprintf(stderr, "Failed to generate address\n");
+			for (int k = 0; k < addr_count; k++) gcry_free(addresses[k]);
+			gcry_free(addresses);
+			zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
+			return -1;
+		}
+		addr_count++;	
+	}
+	curl_buffer_t buffer = {0};
+	result = init_curl_and_addresses((const char **)addresses, addr_count, &buffer, last_request);
+	if (result != 0) {
+		fprintf(stderr, "Failed to initialize curl and addresses\n");
+		return -1;
+	}
+	if (parse_json_for_any_transaction(buffer.data) > 0 ) {
+		printf("Account %d have previous transactions on the blockchain.\n", (int)account_index);
+		return 1;	
+	}
+	printf("Account %d have no recorded transactions on the blockchain, we recommend using this account instead.\n", (int)account_index);
+	return 0;
+}
+
 

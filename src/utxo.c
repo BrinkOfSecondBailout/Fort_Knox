@@ -339,6 +339,58 @@ int address_to_scriptpubkey(const char *address, uint8_t *script, size_t *script
 	return 0;
 }
 
+int calculate_rbf_fee(rbf_data_t *rbf_data, double fee_rate_multiplier, time_t *last_request, long long *new_fee, long long *change_amount) {
+	if (rbf_data->num_inputs <= 0 || rbf_data->num_outputs <= 0 || rbf_data->fee <= 0 || fee_rate_multiplier < 1.0 || !new_fee || !change_amount) {
+		fprintf(stderr, "Invalid inputs\n");
+		return 1;
+	}
+	// Estimate tx virtual size
+	int vsize = estimate_transaction_size(rbf_data->num_inputs, rbf_data->num_outputs);
+	if (vsize == 0) {
+		fprintf(stderr, "Failed to estimate transaction vsize\n");
+		return 1;
+	}
+	printf("Estimated vsize: %d vbytes\n", vsize);
+	// Fetch current feerate
+	long long regular_rate, priority_rate;
+	if (get_fee_rate(&regular_rate, &priority_rate, last_request) != 0) {
+		fprintf(stderr, "Failed to fetch fee rate\n");
+		return 1;
+	}
+	// Calculate new fee
+	regular_rate *= fee_rate_multiplier;
+	printf("New fee rate: ~%lld sat/vbyte\n", regular_rate);
+	*new_fee = (long long)(vsize * regular_rate);
+	if (*new_fee <= rbf_data->fee) {
+		*new_fee = rbf_data->fee + 1000; // Minimum increment (e.g 1000 sats)
+		regular_rate = (long long)(*new_fee) / vsize;
+		printf("Adjusted new fee to exceed original: %lld sat (%lld sat/vbyte)\n", *new_fee, regular_rate);
+	}
+	// Adjust change output
+	if (change_amount) {
+		long long fee_diff = *new_fee - rbf_data->fee;
+		if (*change_amount < fee_diff) {
+			fprintf(stderr, "Insufficient change to cover fee increase\n");
+			return 1;
+		}
+		*change_amount -= fee_diff;
+		printf("Adjusted change amount: %lld sats (%.8f BTC)\n", *change_amount, *change_amount / SATS_PER_BTC, );
+	}
+	return 0;	
+}
+
+int build_rbf_transaction(rbf_data_t *rbf_data, long long new_fee, long long change_amount) {
+	if (!rbf_data || new_fee <= 0 || change_amount <= 0) {
+		fprintf(stderr, "Invalid inputs\n");
+		return 1;
+	}
+printf("Raw Tx Hex: %s\n", rbf_data->raw_tx_hex);
+	
+
+	
+	return 0;	
+}
+
 int build_transaction(const char *recipient, long long amount, utxo_t **selected, int num_selected, key_pair_t *change_back_key, long long fee, char **raw_tx_hex, uint8_t **segwit_tx, size_t *segwit_len, int rbf) {
 	if (!recipient || amount <= 0 || !selected || num_selected <= 0 || fee < 0) {
 		fprintf(stderr, "Invalid inputs\n");
@@ -386,15 +438,12 @@ int build_transaction(const char *recipient, long long amount, utxo_t **selected
 	pos += varint_len;
 	// Inputs
 	for (int i = 0; i < num_selected; i++) {
-		// TxId (reversed)
+		// TxId
 		uint8_t txid_bytes[32];
 		hex_to_bytes((*selected)[i].txid, txid_bytes, 32);
 		//reverse_bytes(txid_bytes, 32);
 		memcpy(buffer + pos, txid_bytes, 32);
-		//for (int j = 0; j < 32; j++) {
-		//	buffer[pos + j] = txid_bytes[31 - j];
-		//}
-print_bytes_as_hex("TXID (reversed) of UTXO", buffer + pos, 32);
+print_bytes_as_hex("TXID of UTXO", buffer + pos, 32);
 		pos += 32;
 		// vout
 		encode_uint32_le((*selected)[i].vout, buffer + pos);
@@ -403,6 +452,7 @@ print_bytes_as_hex("TXID (reversed) of UTXO", buffer + pos, 32);
 		buffer[pos++] = 0x00;
 		// Sequence
 		encode_uint32_le(rbf ? 0xfffffffd : 0xffffffff, buffer + pos);
+print_bytes_as_hex("Sequence", buffer + pos, 4);
 		pos += 4;
 	}
 	// Output count
@@ -481,13 +531,7 @@ print_bytes_as_hex("Segwit Tx", *segwit_tx, *segwit_len);
 		fprintf(stderr, "Failed to allocate raw_tx_hex\n");
 		return 1;
 	}
-	if (bytes_to_hex(buffer, pos, *raw_tx_hex, pos * 2 + 1) != 0) {
-		free(buffer);
-		free(*raw_tx_hex);
-		*raw_tx_hex = NULL;
-		fprintf(stderr, "Failed to convert buffer to hex\n");
-		return 1;
-	}
+	bytes_to_hex(buffer, pos, *raw_tx_hex, pos * 2 + 1);
 printf("Raw Tx Hex: %s\n", *raw_tx_hex);
 	free(buffer);
 	return 0;
@@ -927,7 +971,6 @@ int broadcast_transaction(char **raw_tx_hex, time_t *last_request) {
 	CURL *curl = curl_easy_init();
 	if (!curl) return -1;
 	printf("Broadcasting your transaction...\n");
-// Purposely wrong URL to not send real transaction yet, remove 00 when needed
 	char url[] = "https://blockchain.info/pushtx";
 	char post_data[2048];
 	snprintf(post_data, sizeof(post_data), "tx=%s", *raw_tx_hex);

@@ -31,6 +31,7 @@ int32 balance_handle(User *);
 int32 fee_handle(User *);
 int32 receive_handle(User *);
 int32 send_handle(User *);
+int32 rbf_handle(User *);
 int32 help_handle(User *);
 int32 menu_handle(User *);
 int32 exit_handle(User *);

@@ -47,8 +47,4 @@ int derive_from_change_to_child(const key_pair_t *, uint32_t, key_pair_t *);
 int derive_from_account_to_change(const key_pair_t *, uint32_t, key_pair_t *);
 int derive_from_master_to_account(const key_pair_t *, uint32_t, key_pair_t *);
 int derive_from_master_to_coin(const key_pair_t *, key_pair_t *);
-size_t curl_write_callback_func(void *, size_t, size_t, void *);
-double get_bitcoin_price(time_t*);
-long long get_account_balance(key_pair_t *, uint32_t, time_t*);
-int scan_one_accounts_external_chain(key_pair_t *, uint32_t, time_t *);
 #endif
