@@ -465,6 +465,13 @@ int run_serialize_key_test() {
 	return 0;
 }
 
+int test_sequence_decoder() {
+	char *tx_hex = "02000000000101c273710157c8985efffd549b1a6561a9b30dc199da33c5b7dbca7fffb1db99110400000000fdffffff02e803000000000000160014ba8b4382ab9a0020699dd08f75d701a9952948df4a0c0000000000001600148fe626e89f8118dbe4bab1171c7cbf12531ff3530247304402204ec36fe4dbee979e3ae6ddebce52d5dee35e47dd969c496bf1c6c2e0a217bdc40220264f1f6ea4c26a0a4cc77f8ff53ebb15d1112d554dc4aa15859eea5552744c980121038ca900e08835b7d49da43b8bab03bff37c4b9108bab6f49034340987d20eaf8b00000000";
+	int failures = 0;
+	failures += check_rbf_sequence(tx_hex, 1);
+	return failures;
+}
+
 int main() {
 	int failures = 0; 
 	//failures += run_mnemonic_test();
@@ -473,7 +480,8 @@ int main() {
 	//failures += run_address_generation_test();
 	//failures += run_bech32_decoder();
 	//failures += run_sign_transaction_test();
-    	failures += run_serialize_key_test();
+    	//failures += run_serialize_key_test();
+	failures += test_sequence_decoder();
 	printf("Total failures: %d\n", failures);
     	return failures > 0 ? 1 : 0;
 }

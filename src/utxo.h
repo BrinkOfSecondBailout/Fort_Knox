@@ -21,8 +21,12 @@ typedef struct {
 	char txid[65];
 	int unconfirmed; // 1 if unconfirmed
 	int num_inputs;
+	utxo_t **utxos;
 	int num_outputs;
-	long long fee;
+	char **recipient_addresses;
+	long long *values;
+	long long old_fee;
+	long long new_fee;
 	char *raw_tx_hex;
 } rbf_data_t;
 
@@ -31,8 +35,9 @@ int get_fee_rate(long long *, long long *, time_t *);
 long long get_utxos(key_pair_t *, utxo_t**, int *, uint32_t, time_t *);
 int select_coins(utxo_t *, int, long long, long long, utxo_t **, int *, long long *);
 int address_to_scriptpubkey(const char *, uint8_t *, size_t *);
-int calculate_rbf_fee(rbf_data_t *, double, time_t *, long long *, long long *);
-int build_rbf_transaction(rbf_data_t *, long long, long long);
+int check_rbf_sequence(char *, int);
+int calculate_rbf_fee(rbf_data_t *, double, time_t *);
+int build_rbf_transaction(rbf_data_t *);
 int build_transaction(const char*, long long, utxo_t **, int, key_pair_t *, long long, char **, uint8_t **, size_t *, int);
 int construct_preimage(uint8_t *, size_t, utxo_t **, int, uint8_t *);
 int sign_transaction(char **, utxo_t **, int);

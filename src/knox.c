@@ -1114,7 +1114,7 @@ int32 rbf_handle(User *user) {
 		}
 	}
 	rbf_data_t *rbf_data = malloc(sizeof(rbf_data_t));
-	if (check_rbf_transaction(tx_id, rbf_data, &user->last_api_request) != 0) {
+	if (query_rbf_transaction(tx_id, rbf_data, &user->last_api_request) != 0) {
 		fprintf(stderr, "Unable to fetch transaction\n");
 		return 1;	
 	}
@@ -1127,14 +1127,16 @@ int32 rbf_handle(User *user) {
 		fprintf(stderr, "Unable to fetch raw transaction hex data\n");
 		return 1;
 	}
-	long long new_fee;
-	long long change_amount;
-	if (calculate_rbf_fee(rbf_data, 2, &user->last_api_request, &new_fee, &change_amount) != 0) {
+	if (check_rbf_sequence(rbf_data->raw_tx_hex, rbf_data->num_inputs) != 0) {
+		fprintf(stderr, "This transaction does not have RBF enabled on any of its inputs. Try a different transaction.\n");
+		return 1;
+	}
+	if (calculate_rbf_fee(rbf_data, 2, &user->last_api_request) != 0) {
 		fprintf(stderr, "Failure calculating RBF fee\n");
 		return 1;
 	}
 	while (1) {
-		printf("The new fee amount is %lld sats. Proceed?\nType 'yes' or 'no' (or 'exit' to quit) > ", new_fee);
+		printf("The new fee amount is %lld sats. Proceed?\nType 'yes' or 'no' (or 'exit' to quit) > ", rbf_data->new_fee);
 		zero((void *)cmd, 256);
 		if (!fgets(cmd, 256, stdin)) {
 			fprintf(stderr, "Error reading command\n");
@@ -1158,7 +1160,7 @@ int32 rbf_handle(User *user) {
 			continue;
 		}
 	}
-	if (build_rbf_transaction(rbf_data, new_fee, change_amount) != 0) {
+	if (build_rbf_transaction(rbf_data) != 0) {
 		fprintf(stderr, "Failure building RBF transaction\n");
 		return 1;
 	}	

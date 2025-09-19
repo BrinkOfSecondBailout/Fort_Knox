@@ -186,7 +186,7 @@ printf("Raw TX: %s\n", rbf_data->raw_tx_hex);
 	return 0;
 }
 
-int check_rbf_transaction(char *tx_id, rbf_data_t *rbf_data, time_t *last_request) {
+int query_rbf_transaction(char *tx_id, rbf_data_t *rbf_data, time_t *last_request) {
 	if (!tx_id) {
 		fprintf(stderr, "Invalid inputs\n");
 		return 1;
@@ -214,38 +214,112 @@ int check_rbf_transaction(char *tx_id, rbf_data_t *rbf_data, time_t *last_reques
 	json_t *status = json_object_get(root, "status");
 	json_t *confirmed = json_object_get(status, "confirmed");
 	rbf_data->unconfirmed = json_is_false(confirmed) ? 1 : 0;
-printf("Unconfirmed: %d\n", rbf_data->unconfirmed);
+	// Copy over TXID
 	strncpy(rbf_data->txid, tx_id, 64);
 	reverse_hex(rbf_data->txid, 64);
-printf("TxId(reversed): %s\n", rbf_data->txid);
-	// Num of inputs
-	json_t *vin = json_object_get(root, "vin");
-	if (json_is_array(vin)) {
-		rbf_data->num_inputs = json_array_size(vin);
+	// Extract inputs
+	json_t *vin_array = json_object_get(root, "vin");
+	if (json_is_array(vin_array)) {
+		rbf_data->num_inputs = json_array_size(vin_array);
 	} else {
-		fprintf(stderr, "Unable to read num of inputs\n");
+		fprintf(stderr, "Unable to read vin array input\n");
+		json_decref(root);
 		return 1;
 	}
-printf("Num Inputs: %d\n", rbf_data->num_inputs);
-	// Num of outputs
-	json_t *vout = json_object_get(root, "vout");
-	if (json_is_array(vout)) {
-		rbf_data->num_outputs = json_array_size(vout);
+	rbf_data->utxos = (utxo_t **)malloc(rbf_data->num_inputs * sizeof(utxo_t *));	
+	size_t vin_index;
+	json_t *vin_item;
+	json_array_foreach(vin_array, vin_index, vin_item) {
+		utxo_t *utxo = malloc(sizeof(utxo_t));
+		if (!utxo) {
+			fprintf(stderr, "Failure allocating utxo\n");
+			json_decref(root);
+			return 1;
+		}
+		json_t *id = json_object_get(vin_item, "txid");
+		json_t *vout = json_object_get(vin_item, "vout");
+		if (json_is_string(id) && json_is_integer(vout)) {
+			strncpy(utxo->txid, json_string_value(id), 64);
+			utxo->txid[strlen(utxo->txid)] = '\0';
+			utxo->vout = (uint32_t)json_integer_value(vout);
+			json_t *prevout = json_object_get(vin_item, "prevout");
+			if (prevout && json_is_object(prevout)) {
+				json_t *addr = json_object_get(prevout, "scriptpubkey_address");	
+				strncpy(utxo->address, json_string_value(addr), strlen(json_string_value(addr)));
+				utxo->address[strlen(json_string_value(addr))] = '\0';
+				json_t *value = json_object_get(prevout, "value");
+				utxo->amount = (long long)json_integer_value(value);
+			} else {
+				fprintf(stderr, "Missing or invalid prevout in vin item %zu\n", vin_index);
+				json_decref(root);
+				return 1;
+			}
+		} else {
+			fprintf(stderr, "Unable to read input UTXOs\n");
+			json_decref(root);
+			return 1;
+		}
+		rbf_data->utxos[vin_index] = utxo;
+	}
+	// Extract outputs
+	rbf_data->values = (long long *)malloc(rbf_data->num_outputs * sizeof(long long));
+	json_t *vout_array = json_object_get(root, "vout");
+	if (json_is_array(vout_array)) {
+		rbf_data->num_outputs = json_array_size(vout_array);
 	} else {
 		fprintf(stderr, "Unable to read num of outputs\n");
+		json_decref(root);
 		return 1;
 	}
-
-printf("Num Outputs: %d\n", rbf_data->num_outputs);
+	size_t vout_index;
+	json_t *vout_item;
+	json_array_foreach(vout_array, vout_index, vout_item) {
+		json_t *addr = json_object_get(vout_item, "scriptpubkey_address");
+		if (json_is_string(addr)) {
+			char *address = (char *)malloc(strlen(json_string_value(addr)));
+			strncpy(address, json_string_value(addr), strlen(json_string_value(addr)));
+			address[strlen(json_string_value(addr))] = '\0';
+			rbf_data->recipient_addresses[vout_index] = address;
+		} else {
+			fprintf(stderr, "Unable to read output address\n");
+			json_decref(root);
+			return 1;
+		}
+		json_t *value = json_object_get(vout_item, "value");
+		if (json_is_integer(value)) {
+			rbf_data->values[vout_index] = (long long)json_integer_value(value);
+		} else {
+			fprintf(stderr, "Unable to read output value\n");
+			json_decref(root);
+			return 1;
+		}
+	}	
 	// Fee
 	json_t *fee = json_object_get(root, "fee");
 	if (json_is_integer(fee)) {
-		rbf_data->fee = json_integer_value(fee);
+		rbf_data->old_fee = json_integer_value(fee);
 	} else {
 		fprintf(stderr, "Unable to read fee\n");
+		json_decref(root);
 		return 1;
 	}
-printf("Total Fee: %lld sats\n", rbf_data->fee);
+	json_decref(root);
+printf("Unconfirmed: %d\n", rbf_data->unconfirmed);
+printf("TxId(reversed): %s\n", rbf_data->txid);
+printf("Num Inputs: %d\n", rbf_data->num_inputs);
+for (int i = 0; i < rbf_data->num_inputs; i++) {
+printf("UTXO Txid: %s\n", rbf_data->utxos[i]->txid); 
+printf("UTXO Vout: %d\n", (int)rbf_data->utxos[i]->vout);
+printf("UTXO Address: %s\n", rbf_data->utxos[i]->address);
+printf("UTXO amount: %lld\n", rbf_data->utxos[i]->amount);
+}
+printf("Num Outputs: %d\n", rbf_data->num_outputs);
+for (int i = 0; i < rbf_data->num_outputs; i++) {
+printf("Output Address: %s\n", rbf_data->recipient_addresses[i]);
+printf("Output Value: %lld\n", rbf_data->values[i]);
+}
+printf("Total Fee: %lld sats\n", rbf_data->old_fee);
+
 	return 0;
 }
 

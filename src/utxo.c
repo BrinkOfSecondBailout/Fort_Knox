@@ -339,8 +339,45 @@ int address_to_scriptpubkey(const char *address, uint8_t *script, size_t *script
 	return 0;
 }
 
-int calculate_rbf_fee(rbf_data_t *rbf_data, double fee_rate_multiplier, time_t *last_request, long long *new_fee, long long *change_amount) {
-	if (rbf_data->num_inputs <= 0 || rbf_data->num_outputs <= 0 || rbf_data->fee <= 0 || fee_rate_multiplier < 1.0 || !new_fee || !change_amount) {
+int check_rbf_sequence(char *raw_tx_hex, int num_inputs) {
+	size_t data_len = strlen(raw_tx_hex) / 2;
+	uint8_t tx_data[data_len];
+	resize_convert_hex_to_bytes(raw_tx_hex, tx_data);
+	size_t pos = 0;
+	// Version
+	pos += 4;
+	// Marker and flag
+	pos += 2;
+	// Input count
+	pos += 1;
+	for (int i = 0; i < num_inputs; i++) {
+		char sequence_hex[9];
+		uint8_t sequence_data[4];	
+		// TxId
+		pos += 32;
+		// Vout
+		pos += 4;
+		// ScriptSigSize
+		pos += 1;
+		// Sequence
+		memcpy(sequence_data, &tx_data[pos], 4);
+		pos += 4;
+		// Reverse bytes (little endian)
+		reverse_bytes(sequence_data, 4);
+		bytes_to_hex(sequence_data, 4, sequence_hex, 9);
+printf("Sequence Hex: %s\n", sequence_hex);
+		char *endptr;
+		long int sequence_val = strtol(sequence_hex, &endptr, 16);
+printf("Sequence: %ld\n", sequence_val);
+		if (*endptr == '\0' && sequence_val <= 0xFFFFFFFD) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+int calculate_rbf_fee(rbf_data_t *rbf_data, double fee_rate_multiplier, time_t *last_request) {
+	if (rbf_data->num_inputs <= 0 || rbf_data->num_outputs <= 0 || rbf_data->old_fee <= 0 || fee_rate_multiplier < 1.0 ) {
 		fprintf(stderr, "Invalid inputs\n");
 		return 1;
 	}
@@ -360,34 +397,33 @@ int calculate_rbf_fee(rbf_data_t *rbf_data, double fee_rate_multiplier, time_t *
 	// Calculate new fee
 	regular_rate *= fee_rate_multiplier;
 	printf("New fee rate: ~%lld sat/vbyte\n", regular_rate);
-	*new_fee = (long long)(vsize * regular_rate);
-	if (*new_fee <= rbf_data->fee) {
-		*new_fee = rbf_data->fee + 1000; // Minimum increment (e.g 1000 sats)
-		regular_rate = (long long)(*new_fee) / vsize;
-		printf("Adjusted new fee to exceed original: %lld sat (%lld sat/vbyte)\n", *new_fee, regular_rate);
+	long long new_fee = (long long)(vsize * regular_rate);
+	if (new_fee <= rbf_data->old_fee) {
+		new_fee = rbf_data->old_fee + 1000; // Minimum increment (e.g 1000 sats)
+		regular_rate = (long long)(new_fee) / vsize;
+		printf("Adjusted new fee to exceed original: %lld sat (%lld sat/vbyte)\n", new_fee, regular_rate);
 	}
-	// Adjust change output
-	if (change_amount) {
-		long long fee_diff = *new_fee - rbf_data->fee;
-		if (*change_amount < fee_diff) {
-			fprintf(stderr, "Insufficient change to cover fee increase\n");
-			return 1;
-		}
-		*change_amount -= fee_diff;
-		printf("Adjusted change amount: %lld sats (%.8f BTC)\n", *change_amount, *change_amount / SATS_PER_BTC, );
-	}
+	rbf_data->new_fee = new_fee;
 	return 0;	
 }
 
-int build_rbf_transaction(rbf_data_t *rbf_data, long long new_fee, long long change_amount) {
-	if (!rbf_data || new_fee <= 0 || change_amount <= 0) {
+int build_rbf_transaction(rbf_data_t *rbf_data) {
+	if (!rbf_data) {
 		fprintf(stderr, "Invalid inputs\n");
 		return 1;
 	}
 printf("Raw Tx Hex: %s\n", rbf_data->raw_tx_hex);
-	
+	size_t data_len = strlen(rbf_data->raw_tx_hex) / 2;
+	uint8_t tx_data[data_len];
+	hex_to_bytes(rbf_data->raw_tx_hex, tx_data, data_len);	
+	size_t pos = 0;
+	// Version
+	pos += 4;
+	// Marker and flag
+	pos += 2;
+	// Input count
+	pos += 1;
 
-	
 	return 0;	
 }
 
