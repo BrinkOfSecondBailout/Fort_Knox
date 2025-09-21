@@ -6,14 +6,16 @@
 #include "hash.h"
 #include "query.h"
 
-long long query_utxos(char **addresses, int num_addresses, utxo_t **utxos, int *num_utxos, key_pair_t **child_keys, time_t *last_request) {
+long long query_utxos(char **addresses, int num_addresses, utxo_t ***utxos, int *num_utxos, key_pair_t **child_keys, time_t *last_request) {
 	printf("Querying UTXOs...\n");
 	long long total_balance = 0;
 	int result;
 	if (*addresses[0] == '\0' || num_addresses == 0) {
 		fprintf(stderr, "Addresses invalid.\n");
-		for (int k = 0; k < num_addresses; k++) gcry_free((void *)addresses[k]);
-    		gcry_free((void *)addresses);
+		for (int j = 0; j < num_addresses; j++) free(addresses[j]);
+		free(addresses);
+		for (int k = 0; k < num_addresses; k++) gcry_free((void *)child_keys[k]);
+		gcry_free((void *)child_keys);
 		return -1;
 	}
 	// Set a curl handle for the data transfer
@@ -44,13 +46,14 @@ long long query_utxos(char **addresses, int num_addresses, utxo_t **utxos, int *
     	CURLcode res = curl_easy_perform(curl);
 	*last_request = time(NULL);
     	curl_easy_cleanup(curl);
-
     	if (res != CURLE_OK) {
 		fprintf(stderr, "CURL failed: %s\n", curl_easy_strerror(res));
-        	for (int k = 0; k < num_addresses; k++) gcry_free((void *)addresses[k]);
-    		gcry_free((void *)addresses);
+		for (int j = 0; j < num_addresses; j++) free(addresses[j]);
+		free(addresses);	
+		for (int k = 0; k < num_addresses; k++) gcry_free((void *)child_keys[k]);
+		gcry_free((void *)child_keys);
 		free(buffer.data);
-        	return -1;
+		return -1;
     	}
 	// Parse JSON for total balance
 	json_error_t error;
@@ -58,55 +61,91 @@ long long query_utxos(char **addresses, int num_addresses, utxo_t **utxos, int *
 	free(buffer.data);
 	if (!root) {
 		fprintf(stderr, "JSON parse error: %s\n", error.text);
-		for (int k = 0; k < num_addresses; k++) gcry_free((void *)addresses[k]);
-    		gcry_free((void *)addresses);
+		for (int j = 0; j < num_addresses; j++) free(addresses[j]);
+		free(addresses);	
+		for (int k = 0; k < num_addresses; k++) gcry_free((void *)child_keys[k]);
+		gcry_free((void *)child_keys);
 		return -1;
 	}
 	json_t *unspent_outputs = json_object_get(root, "unspent_outputs");
 	if (!json_is_array(unspent_outputs)) {
 		fprintf(stderr, "No unspent outputs found\n");
-		for (int k = 0; k < num_addresses; k++) gcry_free((void *)addresses[k]);
-    		gcry_free((void *)addresses);
+		for (int j = 0; j < num_addresses; j++) free(addresses[j]);
+		free(addresses);	
+		for (int k = 0; k < num_addresses; k++) gcry_free((void *)child_keys[k]);
+		gcry_free((void *)child_keys);
 		json_decref(root);
 		return -1;
 	}
 	// Allocate UTXOs
 	*num_utxos = json_array_size(unspent_outputs);
-	*utxos = gcry_malloc_secure(*num_utxos * sizeof(utxo_t));
-	if (!utxos) {
+	*utxos = gcry_malloc_secure(*num_utxos * sizeof(utxo_t*));
+	if (!*utxos) {
 		fprintf(stderr, "Failure allocating utxos\n");
-		for (int k = 0; k < num_addresses; k++) gcry_free((void *)addresses[k]);
-    		gcry_free((void *)addresses);
+		for (int j = 0; j < num_addresses; j++) free(addresses[j]);
+		free(addresses);	
+		for (int k = 0; k < num_addresses; k++) gcry_free((void *)child_keys[k]);
+		gcry_free((void *)child_keys);
 		json_decref(root);
 		return -1;
 	}
 	for (int i = 0; i < *num_utxos; i++) {
+		(*utxos)[i] = gcry_malloc_secure(sizeof(utxo_t));
+		zero((void *)(*utxos)[i], sizeof(utxo_t));
+		if (!(*utxos)[i]) {
+			fprintf(stderr, "Error allocating utxo\n");
+			for (int j = 0; j < num_addresses; j++) free(addresses[j]);
+			free(addresses);	
+			for (int k = 0; k < num_addresses; k++) gcry_free((void *)child_keys[k]);
+			gcry_free((void *)child_keys);
+			gcry_free((void *)utxos);
+			for (int l = 0; l < i; l++) {
+				gcry_free((void *)(*utxos)[l]->key);
+				gcry_free((void *)(*utxos)[l]);
+			}
+			*utxos = NULL;
+			*num_utxos = 0;
+			json_decref(root);
+			return -1;
+		}
 		json_t *output = json_array_get(unspent_outputs, i);
 		json_t *tx_hash = json_object_get(output, "tx_hash");
 		json_t *tx_output_n = json_object_get(output, "tx_output_n");
 		json_t *value = json_object_get(output, "value");
 		if (!json_is_string(tx_hash) || !json_is_integer(tx_output_n) || !json_is_integer(value)) {
 			fprintf(stderr, "Invalid UTXO data\n");
-			for (int k = 0; k < num_addresses; k++) gcry_free((void *)addresses[k]);
-    			gcry_free((void *)addresses);
-			gcry_free((void *)*utxos);
+			for (int j = 0; j < num_addresses; j++) free(addresses[j]);
+			free(addresses);	
+			for (int k = 0; k < num_addresses; k++) gcry_free((void *)child_keys[k]);
+			gcry_free((void *)child_keys);
+			for (int l = 0; l <= i; l++) {
+				gcry_free((void *)(*utxos)[l]->key);
+				gcry_free((void *)(*utxos)[l]);
+			}
+			gcry_free((void *)utxos);
 			*utxos = NULL;
 			*num_utxos = 0;
 			json_decref(root);
 			return -1;
 		}
 		// Copy values over to utxo struct
-		strncpy((*utxos)[i].txid, json_string_value(tx_hash), 64);
-		(*utxos)[i].vout = (uint32_t)json_integer_value(tx_output_n);
-		(*utxos)[i].amount = (long long)json_integer_value(value);
-		total_balance += (*utxos)[i].amount;
+		strncpy((*utxos)[i]->txid, json_string_value(tx_hash), 64);
+		(*utxos)[i]->vout = (uint32_t)json_integer_value(tx_output_n);
+		(*utxos)[i]->amount = (long long)json_integer_value(value);
+		total_balance += (*utxos)[i]->amount;
 		// Convert script to Bech32 address
 		json_t *script = json_object_get(output, "script");
 		if (!json_string_value(script)) {
 			fprintf(stderr, "Invalid UTXO data\n");
-			for (int k = 0; k < num_addresses; k++) gcry_free((void *)addresses[k]);
-    			gcry_free((void *)addresses);
-			gcry_free((void *)*utxos);
+			for (int j = 0; j < num_addresses; j++) free(addresses[j]);
+			free(addresses);	
+			for (int k = 0; k < num_addresses; k++) gcry_free((void *)child_keys[k]);
+			gcry_free((void *)child_keys);
+			gcry_free((void *)utxos);
+			for (int l = 0; l <= i; l++) {
+				gcry_free((void *)(*utxos)[l]->key);
+				gcry_free((void *)(*utxos)[l]);
+			}
 			*utxos = NULL;
 			*num_utxos = 0;
 			json_decref(root);
@@ -122,9 +161,15 @@ long long query_utxos(char **addresses, int num_addresses, utxo_t **utxos, int *
 			result = pubkeyhash_to_address(hash, 22, utxo_address, ADDRESS_MAX_LEN);
 			if (result != 0) {
 				fprintf(stderr, "Failure converting witness program to address\n");
-				for (int k = 0; k < num_addresses; k++) gcry_free((void *)addresses[k]);
-				gcry_free((void *)addresses);
-				gcry_free((void *)*utxos);
+				for (int j = 0; j < num_addresses; j++) free(addresses[j]);
+				free(addresses);	
+				for (int k = 0; k < num_addresses; k++) gcry_free((void *)child_keys[k]);
+				gcry_free((void *)child_keys);
+				gcry_free((void *)utxos);
+				for (int l = 0; l <= i; l++) {
+					gcry_free((void *)(*utxos)[l]->key);
+					gcry_free((void *)(*utxos)[l]);
+				}
 				*utxos = NULL;
 				*num_utxos = 0;
 				json_decref(root);
@@ -132,60 +177,70 @@ long long query_utxos(char **addresses, int num_addresses, utxo_t **utxos, int *
 			}
 		} else {
 			fprintf(stderr, "Invalid script for UTXO\n");
-			for (int k = 0; k < num_addresses; k++) gcry_free((void *)addresses[k]);
-    			gcry_free((void *)addresses);
-			gcry_free((void *)*utxos);
+			for (int j = 0; j < num_addresses; j++) free(addresses[j]);
+			free(addresses);	
+			for (int k = 0; k < num_addresses; k++) gcry_free((void *)child_keys[k]);
+			gcry_free((void *)child_keys);
+			gcry_free((void *)utxos);
+			for (int l = 0; l <= i; l++) {
+				gcry_free((void *)(*utxos)[l]->key);
+				gcry_free((void *)(*utxos)[l]);
+			}
 			*utxos = NULL;
 			*num_utxos = 0;
 			json_decref(root);
 			return -1;
 		}
-		(*utxos)[i].key = NULL;
+		(*utxos)[i]->key = NULL;
 		for (int j = 0; j < num_addresses; j++) {
 			if (strncmp(utxo_address, addresses[j], ADDRESS_MAX_LEN) == 0) {
-				(*utxos)[i].key = child_keys[j];
+				(*utxos)[i]->key = child_keys[j];
 				child_keys[j] = NULL; // Preventing double-free
-				strncpy((*utxos)[i].address, utxo_address, ADDRESS_MAX_LEN);
+				strncpy((*utxos)[i]->address, utxo_address, ADDRESS_MAX_LEN);
 				break;
 			}
 		}
-		if (!(*utxos)[i].key) {
+		if (!(*utxos)[i]->key) {
 			fprintf(stderr, "No matching key for UTXO address %s. Skipping.\n", utxo_address);
 		}
 	}
-	for (int k = 0; k < num_addresses; k++) gcry_free((void *)addresses[k]);
-    	gcry_free((void *)addresses);
+	for (int j = 0; j < num_addresses; j++) free(addresses[j]);
+	free(addresses);	
+	for (int i = 0; i < num_addresses; i++) {
+		if (child_keys[i] != NULL) gcry_free((void *)child_keys[i]);
+	} 
+	gcry_free((void *)child_keys);
 	json_decref(root);
 	return total_balance;
 }
 
-long long get_utxos(key_pair_t *master_key, utxo_t **utxos, int *num_utxos, uint32_t account_index, time_t *last_request) {
-	if (!master_key || !utxos || !num_utxos) {
+long long get_utxos(key_pair_t *master_key, utxo_t ***utxos, int *num_utxos, uint32_t account_index, time_t *last_request) {
+	if (!master_key) {
 		fprintf(stderr, "Invalid inputs\n");
-		return -1;
+		return 1;
 	}
 	printf("Gathering UTXO's for account %u...\n", account_index);
 	char **addresses = NULL;
-	addresses = gcry_malloc_secure(GAP_LIMIT * 2 * sizeof(char *));
+	addresses = malloc(GAP_LIMIT * 2 * sizeof(char *));
 	key_pair_t **child_keys = NULL;
 	child_keys = gcry_malloc_secure(GAP_LIMIT * 2 * sizeof(key_pair_t *));
 	if (!addresses || !child_keys) {
 		fprintf(stderr, "Failed to allocate addresses or child keys array\n");
-		if (addresses) gcry_free((void *)addresses);
+		if (addresses) free(addresses);
 		if (child_keys) gcry_free((void *)child_keys);
-		return -1;
+		return 1;
 	}
 	int addr_count = 0;
 	int result;
 	for (size_t i = 0; i < GAP_LIMIT * 2; i++) {
 		// Allocate each of the 40 addresses and NULL it
-		char *address = (char *)gcry_malloc_secure(sizeof(char) * ADDRESS_MAX_LEN);
+		char *address = (char *)malloc(sizeof(char) * ADDRESS_MAX_LEN);
 		if (address == NULL) {
-			for (int j = 0; j < i; j++) gcry_free((void *)addresses[j]);
-			gcry_free((void *)addresses);
+			for (int j = 0; j < i; j++) free(addresses[j]);
+			free(addresses);
 			gcry_free((void *)child_keys);
 			fprintf(stderr, "Error allocating address\n");
-			return -1;
+			return 1;
 		}
 		address[0] = '\0';
 		addresses[i] = address;
@@ -194,39 +249,39 @@ long long get_utxos(key_pair_t *master_key, utxo_t **utxos, int *num_utxos, uint
 	account_key = gcry_malloc_secure(sizeof(key_pair_t));
 	if (!account_key) {
 		fprintf(stderr, "Error gcry_malloc_secure\n");
-		for (int j = 0; j < addr_count; j++) gcry_free((void *)addresses[j]);
-		gcry_free((void *)addresses);
+		for (int j = 0; j < GAP_LIMIT * 2; j++) free(addresses[j]);
+		free(addresses);
 		gcry_free((void *)child_keys);
-		return -1;
+		return 1;
 	}
 	result = derive_from_master_to_account(master_key, account_index, account_key); 
 	if (result != 0) {
 		fprintf(stderr, "Failure deriving account key\n");
-		for (int j = 0; j < addr_count; j++) gcry_free((void *)addresses[j]);
-		gcry_free((void *)addresses);
+		for (int j = 0; j < GAP_LIMIT * 2; j++) free(addresses[j]);
+		free(addresses);
 		gcry_free((void *)child_keys);
 		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
-		return -1;
+		return 1;
 	}
 	for (uint32_t change = 0; change < 2; change++) { // 0 for external, 1 for internal
 		key_pair_t *change_key = NULL;
 		change_key = gcry_malloc_secure(sizeof(key_pair_t));
 		if (!change_key) {
 			fprintf(stderr, "Error gcry_malloc_secure\n");
-			for (int j = 0; j < addr_count; j++) gcry_free((void *)addresses[j]);
-			gcry_free((void *)addresses);
+			for (int j = 0; j < GAP_LIMIT * 2; j++) free(addresses[j]);
+			free(addresses);
 			gcry_free((void *)child_keys);
 			zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
-			return -1;
+			return 1;
 		}
 		result = derive_from_account_to_change(account_key, change, change_key);
 		if (result != 0) {
 			fprintf(stderr, "Failure deriving child key\n");
-			for (int j = 0; j < addr_count; j++) gcry_free((void *)addresses[j]);
-			gcry_free((void *)addresses);
+			for (int j = 0; j < GAP_LIMIT * 2; j++) free(addresses[j]);
+			free(addresses);
 			gcry_free((void *)child_keys);
 			zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
-			return -1;
+			return 1;
 		}
 		// For each change (chain), go through all the indexes
 		for (uint32_t child_index = 0; child_index < (uint32_t) GAP_LIMIT; child_index++) {
@@ -234,29 +289,29 @@ long long get_utxos(key_pair_t *master_key, utxo_t **utxos, int *num_utxos, uint
 			child_key = gcry_malloc_secure(sizeof(key_pair_t));
 			if (!child_key) {
 				fprintf(stderr, "Error gcry_malloc_secure\n");
-				for (int k = 0; k < addr_count; k++) gcry_free((void *)addresses[k]);
-				gcry_free((void *)addresses);
+				for (int j = 0; j < GAP_LIMIT * 2; j++) free(addresses[j]);
+				free(addresses);
 				gcry_free((void *)child_keys);
 				zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
-				return -1;
+				return 1;
 			}
 			result = derive_from_change_to_child(change_key, child_index, child_key);
 			if (result != 0) {
 				fprintf(stderr, "Failed to derive child key\n");
-				for (int k = 0; k < addr_count; k++) gcry_free((void *)addresses[k]);
-				gcry_free((void *)addresses);
+				for (int j = 0; j < GAP_LIMIT * 2; j++) free(addresses[j]);
+				free(addresses);
 				gcry_free((void *)child_keys);
 				zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);
-				return -1;
+				return 1;
 			}
 			result = pubkey_to_address(child_key->key_pub_compressed, PUBKEY_LENGTH, addresses[addr_count], ADDRESS_MAX_LEN);
 			if (result != 0) {
 				fprintf(stderr, "Failed to generate address\n");
-				for (int k = 0; k < addr_count; k++) gcry_free((void *)addresses[k]);
-				gcry_free((void *)addresses);
+				for (int j = 0; j < GAP_LIMIT * 2; j++) free(addresses[j]);
+				free(addresses);
 				gcry_free((void *)child_keys);
 				zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);
-				return -1;
+				return 1;
 			}
 			child_keys[addr_count] = child_key;
 			addr_count++;
@@ -275,48 +330,51 @@ static int compare_utxos(const void *a, const void *b) {
 	return 0;
 }
 
-int select_coins(utxo_t *utxos, int num_utxos, long long amount, long long fee, utxo_t **selected, int *num_selected, long long *input_sum) {
+int select_coins(utxo_t **utxos, int num_utxos, long long amount, long long fee, utxo_t ***selected, int *num_selected, long long *input_sum) {
 	// Greedy
-	if (!utxos || num_utxos <= 0 || !selected || !num_selected || !input_sum || amount <= 0 || fee <= 0) {
+	if (!utxos || num_utxos <= 0 || amount <= 0 || fee <= 0) {
 		fprintf(stderr, "Invalid input\n");
 		return 1;
 	}
 	printf("Preparing the most optimal UTXO's set for your transaction...\n");
 	long long total_available = 0;
 	for (int i = 0; i < num_utxos; i++) {
-		if (utxos[i].amount < 0) {
+		if (utxos[i]->amount < 0) {
 			fprintf(stderr, "Invalid UTXO amount at index %d\n", i);
+			gcry_free((void *)utxos);
 			return 1;
 		}
-		total_available += utxos[i].amount;
+		total_available += utxos[i]->amount;
 	}
 	if (total_available < amount + fee) {
 		fprintf(stderr, "Insufficient funds: %lld available, %lld needed.\n", total_available, amount + fee);
+		gcry_free((void *)utxos);
 		return 1;
 	}
-	utxo_t *sorted_utxos = gcry_malloc_secure(num_utxos * sizeof(utxo_t));
+	utxo_t **sorted_utxos = gcry_malloc_secure(num_utxos * sizeof(utxo_t *));
 	if (!sorted_utxos) {
 		fprintf(stderr, "Failed to allocate sorted utxos\n");
+		gcry_free((void *)utxos);
 		return 1;
 	}
-	memcpy(sorted_utxos, utxos, num_utxos * sizeof(utxo_t));
-	qsort(sorted_utxos, num_utxos, sizeof(utxo_t), compare_utxos);
-
-	// Select greedily
+	memcpy(sorted_utxos, utxos, num_utxos * sizeof(utxo_t*));
+	qsort(sorted_utxos, num_utxos, sizeof(utxo_t*), compare_utxos);
 	long long target = amount + fee;
-	int count = 0;
-	for (int i = 0; i < num_utxos && *input_sum < target; i++) {
-		*input_sum += sorted_utxos[i].amount;
-		count++;
-	}
-	*selected = gcry_malloc_secure(count * sizeof(utxo_t));
+	*selected = gcry_malloc_secure(num_utxos * sizeof(utxo_t *));
 	if (!selected) {
 		fprintf(stderr, "Failed to allocate selected UTXO\n");
 		gcry_free(sorted_utxos);
+		gcry_free((void *)utxos);
 		return 1;
 	}
-	memcpy(*selected, sorted_utxos, count * sizeof(utxo_t));
-	*num_selected = count;
+	// Greedy (largest first)
+	for (int i = num_utxos - 1; i >= 0 && *input_sum < target; i--) {
+		(*selected)[*num_selected] = sorted_utxos[i];
+		*input_sum += sorted_utxos[i]->amount;
+		(*num_selected)++;
+	}
+	gcry_free((void *)sorted_utxos);
+	gcry_free((void *)utxos);
 	return 0;
 }
 
@@ -407,22 +465,148 @@ int calculate_rbf_fee(rbf_data_t *rbf_data, double fee_rate_multiplier, time_t *
 	return 0;	
 }
 
+int match_utxos_to_keys(key_pair_t *master_key, rbf_data_t *rbf_data) {
+	if (!master_key || !rbf_data || rbf_data->num_inputs <= 0 || !rbf_data->utxos || rbf_data->num_outputs <= 0 ) {
+		fprintf(stderr, "Invalid inputs\n");
+		return 1;
+	}
+	int num_inputs = rbf_data->num_inputs;
+	char **addresses = NULL;
+	addresses = malloc((GAP_LIMIT * 2) * (sizeof(char *)));
+	key_pair_t **child_keys = NULL;
+	child_keys = gcry_malloc_secure(GAP_LIMIT * 2 * sizeof(key_pair_t *));
+	if (!addresses || !child_keys) {
+		fprintf(stderr, "Failed to allocate addresses or child keys array\n");
+		if (addresses) free(addresses);
+		if (child_keys) gcry_free((void *)child_keys);
+		return 1;
+	}
+	int addr_count = 0;	
+	int result;
+	for (size_t i = 0; i < GAP_LIMIT * 2; i++) {
+		// Allocate each of the 40 addresses and NULL it
+		char *address = (char *)malloc(ADDRESS_MAX_LEN);
+		if (!address) {
+			for (int j = 0; j < i; j++) free(addresses[j]);
+			free(addresses);
+			gcry_free((void *)child_keys);
+			fprintf(stderr, "Error allocating address\n");
+			return 1;
+		}
+		address[0] = '\0';
+		addresses[i] = address;
+	}
+	key_pair_t *account_key = NULL;
+	account_key = gcry_malloc_secure(sizeof(key_pair_t));
+	if (!account_key) {
+		fprintf(stderr, "Error gcry_malloc_secure\n");
+		for (int j = 0; j < GAP_LIMIT * 2; j++) free(addresses[j]);
+		free(addresses);
+		gcry_free((void *)child_keys);
+		return 1;
+	}
+	result = derive_from_master_to_account(master_key, (uint32_t)rbf_data->account_index, account_key); 
+	if (result != 0) {
+		fprintf(stderr, "Failure deriving account key\n");
+		for (int j = 0; j < GAP_LIMIT * 2; j++) free(addresses[j]);
+		free(addresses);
+		gcry_free((void *)child_keys);
+		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
+		return 1;
+
+	}
+	for (uint32_t change = 0; change < 2; change++) { // 0 for external, 1 for internal
+		key_pair_t *change_key = NULL;
+		change_key = gcry_malloc_secure(sizeof(key_pair_t));
+		if (!change_key) {
+			fprintf(stderr, "Error gcry_malloc_secure\n");
+			for (int j = 0; j < GAP_LIMIT * 2; j++) free(addresses[j]);
+			free(addresses);
+			gcry_free((void *)child_keys);
+			zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
+			return 1;
+		}
+		result = derive_from_account_to_change(account_key, change, change_key);
+		if (result != 0) {
+			fprintf(stderr, "Failure deriving child key\n");
+			for (int j = 0; j < GAP_LIMIT * 2; j++) free(addresses[j]);
+			free(addresses);
+			gcry_free((void *)child_keys);
+			zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
+			return 1;
+		}
+		// For each change (chain), go through all the indexes
+		for (uint32_t child_index = 0; child_index < (uint32_t)GAP_LIMIT; child_index++) {
+			key_pair_t *child_key = NULL;
+			child_key = gcry_malloc_secure(sizeof(key_pair_t));
+			if (!child_key) {
+				fprintf(stderr, "Error gcry_malloc_secure\n");
+				for (int j = 0; j < GAP_LIMIT * 2; j++) free(addresses[j]);
+				free(addresses);
+				gcry_free((void *)child_keys);
+				zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
+				return 1;
+			}
+			result = derive_from_change_to_child(change_key, child_index, child_key);
+			if (result != 0) {
+				fprintf(stderr, "Failed to derive child key\n");
+				for (int j = 0; j < GAP_LIMIT * 2; j++) free(addresses[j]);
+				free(addresses);
+				gcry_free((void *)child_keys);
+				zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);
+				return 1;
+			}
+			result = pubkey_to_address(child_key->key_pub_compressed, PUBKEY_LENGTH, addresses[addr_count], ADDRESS_MAX_LEN);
+			if (result != 0) {
+				fprintf(stderr, "Failed to generate address\n");
+				for (int j = 0; j < GAP_LIMIT * 2; j++) free(addresses[j]);
+				free(addresses);
+				gcry_free((void *)child_keys);
+				zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);
+				return 1;
+			}
+			child_keys[addr_count] = child_key;
+			addr_count++;
+		}
+		zero_and_gcry_free((void *)change_key, sizeof(key_pair_t));
+	}
+	zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
+	
+	// Match UTXO inputs to private keys	
+	for (int i = 0; i < num_inputs; i++) {
+		for (int j = 0; j < addr_count; j++) {
+			if (strcmp(rbf_data->utxos[i]->address, addresses[j]) == 0) {
+				rbf_data->utxos[i]->key = child_keys[j];
+				child_keys[j] = NULL; // Prevent double-free
+				printf("Found matching private key for UTXO index %d\n", i);
+				break;
+			} else {
+				if (j == addr_count - 1) {
+					fprintf(stderr, "Unable to find matching key for UTXO index %d\n", i);
+					for (int i = 0; i < addr_count; i++) {
+						if (child_keys[i] != NULL) gcry_free((void*)child_keys[i]);
+					}
+					gcry_free((void *)child_keys);
+					return 1;
+				}
+			}
+		}
+	}
+	
+	for (int i = 0; i < addr_count; i++) {
+		if (child_keys[i] != NULL) gcry_free((void*)child_keys[i]);
+	}
+	gcry_free((void *)child_keys);
+	printf("Successfully matched all UTXO inputs to private keys.\n");
+	return 0;
+}
+
 int build_rbf_transaction(rbf_data_t *rbf_data) {
 	if (!rbf_data) {
 		fprintf(stderr, "Invalid inputs\n");
 		return 1;
 	}
 printf("Raw Tx Hex: %s\n", rbf_data->raw_tx_hex);
-	size_t data_len = strlen(rbf_data->raw_tx_hex) / 2;
-	uint8_t tx_data[data_len];
-	hex_to_bytes(rbf_data->raw_tx_hex, tx_data, data_len);	
-	size_t pos = 0;
-	// Version
-	pos += 4;
-	// Marker and flag
-	pos += 2;
-	// Input count
-	pos += 1;
 
 	return 0;	
 }
@@ -436,11 +620,11 @@ int build_transaction(const char *recipient, long long amount, utxo_t **selected
 	// Validate funds
 	long long input_sum = 0;
 	for (int i = 0; i < num_selected; i++) {
-		if ((*selected)[i].amount < 0) {
+		if (selected[i]->amount < 0) {
 			fprintf(stderr, "Invalid UTXO amount at index %d\n", i);
 			return 1;
 		}
-		input_sum += (*selected)[i].amount;
+		input_sum += selected[i]->amount;
 	}	
 	if (input_sum < amount + fee) {
 		fprintf(stderr, "Insufficient funds, %lld < %lld\n", input_sum, amount + fee);
@@ -466,8 +650,8 @@ int build_transaction(const char *recipient, long long amount, utxo_t **selected
 	uint8_t varint_buf[9];
 	size_t varint_len;
 	if (encode_varint(num_selected, varint_buf, &varint_len) != 0) {
-		free(buffer);
 		fprintf(stderr, "Failed to encode input count\n");
+		free(buffer);
 		return 1;
 	}	
 	memcpy(buffer + pos, varint_buf, varint_len);
@@ -479,7 +663,6 @@ int build_transaction(const char *recipient, long long amount, utxo_t **selected
 		hex_to_bytes((*selected)[i].txid, txid_bytes, 32);
 		//reverse_bytes(txid_bytes, 32);
 		memcpy(buffer + pos, txid_bytes, 32);
-print_bytes_as_hex("TXID of UTXO", buffer + pos, 32);
 		pos += 32;
 		// vout
 		encode_uint32_le((*selected)[i].vout, buffer + pos);
@@ -488,13 +671,12 @@ print_bytes_as_hex("TXID of UTXO", buffer + pos, 32);
 		buffer[pos++] = 0x00;
 		// Sequence
 		encode_uint32_le(rbf ? 0xfffffffd : 0xffffffff, buffer + pos);
-print_bytes_as_hex("Sequence", buffer + pos, 4);
 		pos += 4;
 	}
 	// Output count
 	if (encode_varint(num_outputs, varint_buf, &varint_len) != 0) {
-		free(buffer);
 		fprintf(stderr, "Failed to encode output count\n");
+		free(buffer);
 		return 1;
 	}
 	memcpy(buffer + pos, varint_buf, varint_len);
@@ -504,8 +686,8 @@ print_bytes_as_hex("Sequence", buffer + pos, 4);
 	uint8_t script[25];
 	size_t script_len;
 	if (address_to_scriptpubkey(recipient, script, &script_len) != 0) {
-		free(buffer);
 		fprintf(stderr, "Failed to convert recipient address\n");
+		free(buffer);
 		return 1;
 	}
 	// Encode amount to be sent
@@ -554,6 +736,7 @@ print_bytes_as_hex("Sequence", buffer + pos, 4);
 	*segwit_tx = (uint8_t *)malloc(*segwit_len);
 	if (!*segwit_tx) {
 		fprintf(stderr, "Error allocating segwit_tx\n");
+		free(buffer);
 		return 1;
 	}
 	memcpy(*segwit_tx, buffer, 4);
@@ -562,8 +745,9 @@ print_bytes_as_hex("Segwit Tx", *segwit_tx, *segwit_len);
 
 	// Convert to hex
 	*raw_tx_hex = malloc(pos * 2 + 1);
-	if (!raw_tx_hex) {
+	if (!*raw_tx_hex) {
 		free(buffer);
+		free(*segwit_tx);
 		fprintf(stderr, "Failed to allocate raw_tx_hex\n");
 		return 1;
 	}
@@ -614,14 +798,12 @@ int construct_preimage(uint8_t *tx_data, size_t tx_len, utxo_t **selected, int n
 	pos += 1;
 	if (num_inputs != num_selected) {
 		fprintf(stderr, "Inputs count mismatched with UTXOs selected\n");
-		free(tx_data);
 		return 1;
 	}
 	// Parse inputs and serialize outpoints + sequences
 	uint8_t *outpoints = malloc(num_inputs * 36); // 32 txid + 4 vout
 	uint8_t *sequences = malloc(num_inputs * 4);
 	if (!outpoints || !sequences) {
-		free(tx_data);
 		fprintf(stderr, "Failure allocating outpoints and sequences\n");
 		return 1;
 	}
@@ -657,7 +839,6 @@ int construct_preimage(uint8_t *tx_data, size_t tx_len, utxo_t **selected, int n
 	// Parse outputs and serialize
 	uint8_t *outputs_serialized = malloc(num_outputs * (8 + 1 + 22)); // Amount (8 bytes) and script ~22 for P2WPKH
 	if (!outputs_serialized) {
-		free(tx_data);
 		fprintf(stderr, "Failed to allocate outputs_serialized\n");
 		return 1;
 	}
@@ -693,7 +874,6 @@ print_bytes_as_hex("Output Amount", outputs_serialized + outputs_pos, 8);
 	size_t preimage_len = 4 + 32 + 32 + ((36 + 26 + 8 + 4) * num_inputs) + 32 + 4 + 4; 
 	uint8_t *preimage = malloc(preimage_len);
 	if (!preimage) {
-		free(tx_data);
 		fprintf(stderr, "Failed to allocate preimage\n");
 		return 1;
 	}
@@ -723,14 +903,14 @@ print_bytes_as_hex("TXID + VOUT", preimage + preimage_pos, 36);
 		// ScriptCode (P2WPKH format: 1976a914<hash>88ac)
 		uint8_t pubkeyhash[20];
 		if (key_to_pubkeyhash((*selected)[i].key, pubkeyhash) != 0) {
-			free(tx_data);
 			fprintf(stderr, "Error extracting pub key hash\n");
+			free(preimage);
 			return 1;		
 		}
 		uint8_t scriptcode[26];
 		if (construct_scriptcode(pubkeyhash, scriptcode, 26) != 0) {
-			free(tx_data);
 			fprintf(stderr, "Error constructing scriptcode\n");
+			free(preimage);
 			return 1;
 		}
 		memcpy(preimage + preimage_pos, scriptcode, 26);
@@ -960,42 +1140,47 @@ int sign_transaction(char **raw_tx_hex, utxo_t **selected, int num_selected) {
 	uint8_t sighash[32];
 	if (construct_preimage(tx_data, tx_len, selected, num_selected, sighash) != 0) {
 		fprintf(stderr, "construct_preimage() failure\n");	
+		free(tx_data);
 		return 1;
 	}
 	// Extract locktime
 	uint8_t locktime[4];
 	memcpy(locktime, tx_data + tx_len - 4, 4);
 	// Append witnesses
-	size_t witness_pos = tx_len - 4; // Append at end (before locktime)
-	// Reallocate to larger array for witness(es)
+	// Allocate a larger array for witness(es)
 	size_t new_tx_len = tx_len + (num_selected * 108); // Maximum witness size
-	uint8_t *new_tx_data = (uint8_t *)realloc(tx_data, new_tx_len);
+	uint8_t *new_tx_data = (uint8_t *)malloc(new_tx_len);
 	if (!new_tx_data) {
 		free(tx_data);
 		fprintf(stderr, "Failure to allocate new_tx_data\n");
 		return 1;
 	}
+	memcpy(new_tx_data, tx_data, tx_len - 4); // Everything except locktime
+	size_t current_pos = tx_len - 4;
 	for (int i = 0; i < num_selected; i++) {
 		uint8_t witness[108]; // 72 for signature, 33 for pubkey, 3 extra description bytes
 		size_t witness_len = 0;
 		if (sign_preimage_hash(sighash, (*selected)[i].key->key_priv, witness, &witness_len, (*selected)[i].key->key_pub_compressed) != 0) {
 			fprintf(stderr, "Failure to sign preimage hash\n");
+			free(new_tx_data);
 			return 1;
 		}
 		// Append to witness
-		memcpy(new_tx_data + witness_pos, witness, witness_len);
-		witness_pos += witness_len;
+		memcpy(new_tx_data + current_pos, witness, witness_len);
+		current_pos += witness_len;
 	}
 	// Insert locktime at the end after witness
-	memcpy(new_tx_data + witness_pos, locktime, 4);
+	memcpy(new_tx_data + current_pos, locktime, 4);
+	current_pos += 4;
 	// Convert back to hex
-    	char *new_raw_tx_hex = malloc(new_tx_len * 2);
+    	char *new_raw_tx_hex = malloc(current_pos * 2 + 1);
     	if (!new_raw_tx_hex) {
 		free(new_tx_data);
 		fprintf(stderr, "Failed to allocate new_raw_tx_hex\n");
 		return 1;
     	}
-    	bytes_to_hex(new_tx_data, new_tx_len, new_raw_tx_hex, new_tx_len * 2);
+    	bytes_to_hex(new_tx_data, current_pos, new_raw_tx_hex, current_pos * 2 + 1);
+	new_raw_tx_hex[current_pos * 2] = '\0';
 	
     	*raw_tx_hex = new_raw_tx_hex;
 printf("Signed hex: %s\n", *raw_tx_hex);
@@ -1003,13 +1188,14 @@ printf("Signed hex: %s\n", *raw_tx_hex);
     	return 0;
 }
 
-int broadcast_transaction(char **raw_tx_hex, time_t *last_request) {
+int broadcast_transaction(char *raw_tx_hex, time_t *last_request) {
 	CURL *curl = curl_easy_init();
 	if (!curl) return -1;
 	printf("Broadcasting your transaction...\n");
-	char url[] = "https://blockchain.info/pushtx";
+// Purposely typed wrong to test
+	char url[] = "https://000blockchain.info/pushtx";
 	char post_data[2048];
-	snprintf(post_data, sizeof(post_data), "tx=%s", *raw_tx_hex);
+	snprintf(post_data, sizeof(post_data), "tx=%s", raw_tx_hex);
 	
 	curl_easy_setopt(curl, CURLOPT_URL, url);
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_data);

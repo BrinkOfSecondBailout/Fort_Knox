@@ -357,6 +357,10 @@ int generate_master_key(const uint8_t *seed, size_t seed_len, key_pair_t *master
 // This function always requires a parent private key to calculate a child private/public key pair
 // Not suitable for a watch-only wallet function where only a parent public key is needed to create a child public key for non-hardened derivation
 int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child) {
+	if (!parent || !child) {
+		fprintf(stderr, "Invalid inputs in derive_child_key\n");
+		return 1;
+	}
 	uint8_t data[37]; // For HMAC input, 1 + 32 priv + 4 index or 33 pub + 4 index
 	size_t data_len;
 	int hardened = (index & HARD_FLAG) != 0; // 0: normal, 0x80000000: hardened
@@ -407,7 +411,6 @@ int derive_child_key(const key_pair_t *parent, uint32_t index, key_pair_t *child
 
     	child_priv_mpi = gcry_mpi_new(0);
 	if (!child_priv_mpi) return 1;
-
 	// The calculation for private key (child = parent priv + IL mod n)
     	gcry_mpi_addm(child_priv_mpi, parent_priv_mpi, il_mpi, n_mpi);
     	gcry_mpi_release(parent_priv_mpi);
@@ -486,8 +489,7 @@ int derive_from_master_to_account(const key_pair_t *master_key, uint32_t account
 	key_pair_t *purpose_key = NULL;
 	purpose_key = gcry_malloc_secure(sizeof(key_pair_t));
 	if (!purpose_key) {
-		fprintf(stderr, "Error gcry malloc for child key\n");
-		zero_and_gcry_free((void *)purpose_key, sizeof(key_pair_t));
+		fprintf(stderr, "Error gcry malloc for purpose key\n");
 		return 1;
 	}
 	int result = derive_child_key(master_key, HARD_FLAG | 84, purpose_key); // m/84'
@@ -499,8 +501,8 @@ int derive_from_master_to_account(const key_pair_t *master_key, uint32_t account
 	key_pair_t *coin_key = NULL;
 	coin_key = gcry_malloc_secure(sizeof(key_pair_t));
 	if (!coin_key) {
-		fprintf(stderr, "Error gcry malloc for child key\n");
-		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)purpose_key, (void *)coin_key, NULL);
+		fprintf(stderr, "Error gcry malloc for coin key\n");
+		zero_and_gcry_free((void *)purpose_key, sizeof(key_pair_t));
 		return 1;
 	}
 	result = derive_child_key(purpose_key, HARD_FLAG | 0, coin_key); // m/84'/0'
@@ -526,7 +528,6 @@ int derive_from_master_to_coin(const key_pair_t *master_key, key_pair_t *coin_ke
 	purpose_key = gcry_malloc_secure(sizeof(key_pair_t));
 	if (!purpose_key) {
 		fprintf(stderr, "Error gcry malloc for child key\n");
-		zero_and_gcry_free((void *)purpose_key, sizeof(key_pair_t));
 		return 1;
 	}
 	int result = derive_child_key(master_key, HARD_FLAG | 84, purpose_key); // m/84'
@@ -538,7 +539,7 @@ int derive_from_master_to_coin(const key_pair_t *master_key, key_pair_t *coin_ke
 	result = derive_child_key(purpose_key, HARD_FLAG | 0, coin_key); // m/84'/0'
 	if (result != 0) {
 		fprintf(stderr, "Failed to derive coin key\n");
-		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)purpose_key, (void *)coin_key, NULL);
+		zero_and_gcry_free((void *)purpose_key, sizeof(key_pair_t));
 		return 1;
 	}
 	zero_and_gcry_free((void *)purpose_key, sizeof(key_pair_t));

@@ -18,13 +18,18 @@ typedef struct {
 } utxo_t;
 
 typedef struct {
+	char spk[23]; // scriptpubkey = pubkeyhash + 2 bytes prefix + null
+	long long amount;
+} rbf_output_t;
+
+typedef struct {
 	char txid[65];
+	uint32_t account_index;
 	int unconfirmed; // 1 if unconfirmed
 	int num_inputs;
 	utxo_t **utxos;
 	int num_outputs;
-	char **recipient_addresses;
-	long long *values;
+	rbf_output_t **outputs;
 	long long old_fee;
 	long long new_fee;
 	char *raw_tx_hex;
@@ -32,15 +37,16 @@ typedef struct {
 
 int estimated_transaction_size(int, int);
 int get_fee_rate(long long *, long long *, time_t *);
-long long get_utxos(key_pair_t *, utxo_t**, int *, uint32_t, time_t *);
-int select_coins(utxo_t *, int, long long, long long, utxo_t **, int *, long long *);
+long long get_utxos(key_pair_t *, utxo_t***, int *, uint32_t, time_t *);
+int select_coins(utxo_t **, int, long long, long long, utxo_t ***, int *, long long *);
 int address_to_scriptpubkey(const char *, uint8_t *, size_t *);
 int check_rbf_sequence(char *, int);
 int calculate_rbf_fee(rbf_data_t *, double, time_t *);
+int match_utxos_to_keys(key_pair_t *, rbf_data_t *);
 int build_rbf_transaction(rbf_data_t *);
 int build_transaction(const char*, long long, utxo_t **, int, key_pair_t *, long long, char **, uint8_t **, size_t *, int);
 int construct_preimage(uint8_t *, size_t, utxo_t **, int, uint8_t *);
 int sign_transaction(char **, utxo_t **, int);
-int broadcast_transaction(char **, time_t *);
+int broadcast_transaction(char *, time_t *);
 
 #endif

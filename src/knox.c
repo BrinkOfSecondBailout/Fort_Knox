@@ -35,15 +35,11 @@ void print_logo() {
 int init_user(User *user) {
 	if (!user) return 1;
 	zero((void *)user, sizeof(User));
-	zero((void *)user->seed, SEED_LENGTH);
-	user->master_key = NULL;
-	user->accounts = NULL;
-	user->accounts = gcry_calloc_secure(ACCOUNTS_CAPACITY, sizeof(account_t));
+	user->accounts = malloc(ACCOUNTS_CAPACITY * sizeof(account_t *));
 	if (!user->accounts) {
 		zero_and_gcry_free((void *)user, sizeof(User));
 		return 1;
 	}
-	zero((void *)user->accounts, ACCOUNTS_CAPACITY * sizeof(account_t));
 	user->accounts_count = 0;
 	user->accounts_capacity = ACCOUNTS_CAPACITY;
 	user->last_api_request = 0;
@@ -66,11 +62,16 @@ void free_user(User *user) {
 		printf("User master key cleared...\n");
 	}
 	if (user->accounts_count > 0) {
-		for (size_t i = 0; i < user->accounts_count; i++) {
-			zero_and_gcry_free((void *)user->accounts[i], sizeof(account_t));
-			user->accounts[i] = NULL;
+		for (size_t i = 0; i < user->accounts_capacity; i++) {
+			if (user->accounts[i]) {
+				free(user->accounts[i]);
+			}
 		}
-		printf("User accounts cleared...\n");
+	}
+	printf("User accounts cleared...\n");
+	if (user->accounts) {
+		free(user->accounts);
+		user->accounts = NULL;
 	}
 	zero((void *)user->seed, SEED_LENGTH);
 	user->accounts_count = 0;
@@ -95,21 +96,17 @@ account_t *add_account_to_user(User *user, uint32_t account_index) {
 			return user->accounts[i];
 		}
 	}
-	// Resize dynamic array if necessary
 	if (user->accounts_count == user->accounts_capacity) {
 		fprintf(stderr, "Maximum accounts reached.\n");
+		printf("Here are the three existing accounts you can use:\n");
+		for (int i = 0; i < user->accounts_count; i++) {
+			printf("%u\n", user->accounts[i]->account_index);
+		}
 		return NULL;
 	}
 	// Create new account
-	account_t *new_account = (account_t *)gcry_malloc_secure(sizeof(account_t));
+	account_t *new_account = malloc(sizeof(account_t));
 	new_account->account_index = account_index;
-	// Initialize child keys for account
-	uint32_t **used_indexes = gcry_calloc_secure(INITIAL_USED_INDEXES_CAPACITY, sizeof(uint32_t*));
-	if (!used_indexes) {
-		fprintf(stderr, "Failure allocating used indexes pointers\n");
-		zero_and_gcry_free((void *)new_account, sizeof(account_t));
-		return NULL;
-	}
 	new_account->used_indexes_count = 0;
 	// Add account to user accounts
 	user->accounts[user->accounts_count++] = new_account;
@@ -573,6 +570,8 @@ int32 key_handle(User *user) {
 			return 1;
 		}
 		result = serialize_extended_key(coin_key, account_key, 0, &output);
+		zero_and_gcry_free((void *)coin_key, sizeof(key_pair_t));
+		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
 	}
 	if (result != 0) {
 		fprintf(stderr, "Serialization error\n");
@@ -736,12 +735,14 @@ int32 receive_handle(User *user) {
 	account_key = gcry_malloc_secure(sizeof(key_pair_t));
 	if (!account_key) {
 		fprintf(stderr, "Error gcry_malloc_secure\n");
+		gcry_free(account);
 		return 1;
 	}
 	result = derive_from_master_to_account(user->master_key, account_index, account_key); // m/84'/0'/account'
 	if (result != 0) {
 		fprintf(stderr, "Failed to derive account key\n");
 		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
+		gcry_free(account);
 		return 1;
 	}
 		
@@ -749,11 +750,14 @@ int32 receive_handle(User *user) {
 	change_key = gcry_malloc_secure(sizeof(key_pair_t));
 	if (!change_key) {
 		fprintf(stderr, "Error gcry_malloc_secure\n");
+		gcry_free(account);
+		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
 		return 1;
 	}
 	result = derive_from_account_to_change(account_key, (uint32_t)0, change_key);
 	if (result != 0) {
 		fprintf(stderr, "Failed to derive change key\n");
+		gcry_free(account);
 		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
 		return 1;
 	}
@@ -761,12 +765,14 @@ int32 receive_handle(User *user) {
 	child_key = gcry_malloc_secure(sizeof(key_pair_t));
 	if (!child_key) {
 		fprintf(stderr, "Error gcry_malloc_secure\n");
+		gcry_free(account);
 		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
 		return 1;
 	}
 	result = derive_from_change_to_child(change_key, (uint32_t)account->used_indexes_count, child_key);
 	if (result != 0) {
 		fprintf(stderr, "Failed to derive child key\n");
+		gcry_free(account);
 		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);
 		return 1;
 	}
@@ -775,12 +781,13 @@ int32 receive_handle(User *user) {
 	char address[ADDRESS_MAX_LEN];
 	result = pubkey_to_address(child_key->key_pub_compressed, PUBKEY_LENGTH, address, ADDRESS_MAX_LEN);
 	if (result != 0) {
-		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)child_key, NULL);	
+		gcry_free(account);
+		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);	
 		fprintf(stderr, "Failed to generate receive address.\n");
 		return 1;
 	}
 	// Clean up intermediate keys
-	zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)child_key, NULL);	
+	zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);	
 	// New receive address
 	printf("New receive address: %s\n", address);
 	printf("Use this adddress to receive Bitcoin. You can:\n"
@@ -832,20 +839,28 @@ int32 send_handle(User *user) {
 		}
 	}
 	printf("Please wait while we query the blockchain to check your UTXOs balance...\n(Account: %d, first 20 address indexes)\n", (int)account_index);
-	utxo_t *utxos = NULL;
+	utxo_t **utxos = NULL;
 	int num_utxos = 0;
 	long long total_balance = get_utxos(user->master_key, &utxos, &num_utxos, account_index, &user->last_api_request);
+
 	if (total_balance < 0) {
 		fprintf(stderr, "Failed to fetch UTXOs.\n");
 		return 1;
 	}
+
 	printf("Available balance:\n"
 		"%lld satoshis (%.8f BTC)\n"
 		"%.2f dollars (most recent price: $%.2f)\n",
 		total_balance,(double)total_balance / SATS_PER_BTC,
 		((double)total_balance / SATS_PER_BTC) * user->last_price_cached, user->last_price_cached);
+
 	if (total_balance == 0) {
 		printf("No sats to send.\n");
+		for (int i = 0; i < num_utxos; i++) {
+			gcry_free((void *)utxos[i]->key);
+			gcry_free((void *)utxos[i]);
+		}
+		gcry_free((void *)utxos);
 		return 0;
 	}
 
@@ -855,6 +870,11 @@ int32 send_handle(User *user) {
 	zero((void *)recipient, ADDRESS_MAX_LEN);
 	if (!fgets(recipient, ADDRESS_MAX_LEN, stdin)) {
 		fprintf(stderr, "Error reading command\n");
+		for (int i = 0; i < num_utxos; i++) {
+			gcry_free((void *)utxos[i]->key);
+			gcry_free((void *)utxos[i]);
+		}
+		gcry_free((void *)utxos);
 		return 1;
 	}
 	printf("Got it!\nYou entered: %s", recipient);
@@ -882,6 +902,11 @@ int32 send_handle(User *user) {
 	
 	if (get_fee_rate(&regular_rate, &priority_rate, &user->last_api_request) != 0) {
 		fprintf(stderr, "Fee rate fetch failed.\n");
+		for (int i = 0; i < num_utxos; i++) {
+			gcry_free((void *)utxos[i]->key);
+			gcry_free((void *)utxos[i]);
+		}
+		gcry_free((void *)utxos);
 		return 1;
 	}
 	printf("Here are the current market fee rates (in satoshis):\n"
@@ -946,7 +971,7 @@ int32 send_handle(User *user) {
 			break;
 		}	
 	}
-	utxo_t *selected = NULL;
+	utxo_t **selected = NULL;
 	int num_selected = 0;
 	long long input_sum = 0;
 	printf("The program will now select the best UTXOs for this transaction, using a 'greedy' method,\n"
@@ -954,29 +979,32 @@ int32 send_handle(User *user) {
 	result = select_coins(utxos, num_utxos, amount, fee, &selected, &num_selected, &input_sum);
 	if (result != 0) {
 		printf("Coin selection failed\n");
-		for (int i = 0; i < num_utxos; i++) gcry_free(utxos[i].key);
-		if (num_selected > 0) gcry_free(selected);
-		gcry_free(utxos);
+		if (num_selected > 0) {
+			for (int i = 0; i < num_selected; i++) {
+				gcry_free((void *)selected[i]->key);
+				gcry_free((void *)selected[i]);
+			}
+		}
 		return 1;
 	}
 	printf("Selected %d UTXOs, total: %lld satoshis\n", num_selected, input_sum);
 	for (int i = 0; i < num_selected; i++) {
 		printf("UTXO index=%d: txid=%s, vout=%u, amount=%lld\n", 
-			i, selected[i].txid, selected[i].vout, selected[i].amount);
+			i, selected[i]->txid, selected[i]->vout, selected[i]->amount);
 	}
+	
 	long long change = input_sum - amount - fee;
 	key_pair_t *change_back_key = NULL;
 	change_back_key = gcry_malloc_secure(sizeof(key_pair_t));
 	account_t *account = add_account_to_user(user, account_index);
-	if (!account) {
-		fprintf(stderr, "Failure adding account\n");
-		return 1;
-	}
-	if (!change_back_key) {
-		fprintf(stderr, "Change back key allocation failed\n");
-		for (int i = 0; i < num_utxos; i++) gcry_free(utxos[i].key);
-		if (num_selected > 0) gcry_free(selected);
-		gcry_free(utxos);
+	if (!account || !change_back_key) {
+		fprintf(stderr, "Failure adding account or allocating change_back_key\n");
+		if (num_selected > 0) {
+			for (int i = 0; i < num_selected; i++) {
+				gcry_free((void *)selected[i]->key);
+				gcry_free((void *)selected[i]);
+			}
+		}
 		return 1;
 	}
 	if (change > 0) {
@@ -984,80 +1012,100 @@ int32 send_handle(User *user) {
 		result = derive_from_master_to_account(user->master_key, account_index, change_back_key); 
 		if (result != 0) {
 			fprintf(stderr, "Account key derivation failed\n");
-			for (int i = 0; i < num_utxos; i++) gcry_free(utxos[i].key);
-			if (num_selected > 0) gcry_free(selected);
-			gcry_free(change_back_key);
-			gcry_free(utxos);
+			if (num_selected > 0) {
+				for (int i = 0; i < num_selected; i++) {
+					gcry_free((void *)selected[i]->key);
+					gcry_free((void *)selected[i]);
+				}
+			}
+			gcry_free((void *)account);	
+			gcry_free((void *)change_back_key);
 			return 1;
 		}
 		result = derive_from_account_to_change(change_back_key, (uint32_t)1, change_back_key);
 		if (result != 0) {
 			fprintf(stderr, "Change key derivation failed\n");
-			for (int i = 0; i < num_utxos; i++) gcry_free(utxos[i].key);
-			if (num_selected > 0) gcry_free(selected);
-			gcry_free(change_back_key);
-			gcry_free(utxos);
+			if (num_selected > 0) {
+				for (int i = 0; i < num_selected; i++) {
+					gcry_free((void *)selected[i]->key);
+					gcry_free((void *)selected[i]);
+				}
+			}
+			gcry_free((void *)account);	
+			gcry_free((void *)change_back_key);
 			return 1;
 		}
 		result = derive_from_change_to_child(change_back_key, change_index, change_back_key);
 		if (result != 0) {
 			fprintf(stderr, "Child key derivation failed\n");
-			for (int i = 0; i < num_utxos; i++) gcry_free(utxos[i].key);
-			if (num_selected > 0) gcry_free(selected);
-			gcry_free(change_back_key);
-			gcry_free(utxos);
+			if (num_selected > 0) {
+				for (int i = 0; i < num_selected; i++) {
+					gcry_free((void *)selected[i]->key);
+					gcry_free((void *)selected[i]);
+				}
+			}
+			gcry_free((void *)account);	
+			gcry_free((void *)change_back_key);
 			return 1;
 		}
 		account->used_indexes_count++;
 	}	
+	gcry_free((void *)account);	
+	gcry_free((void *)change_back_key);
+
 	char *raw_tx_hex = NULL;
 	uint8_t *segwit_tx = NULL;
 	size_t segwit_len = 0;
-	result = build_transaction(recipient, amount, &selected, num_selected, change_back_key, fee, &raw_tx_hex, &segwit_tx, &segwit_len, rbf);
+	result = build_transaction(recipient, amount, selected, num_selected, change_back_key, fee, &raw_tx_hex, &segwit_tx, &segwit_len, rbf);
 	if (result != 0) {
 		fprintf(stderr, "Failure building transaction\n");
-		for (int i = 0; i < num_utxos; i++) gcry_free(utxos[i].key);
-		if (num_selected > 0) gcry_free(selected);
-		gcry_free(change_back_key);
-		gcry_free(utxos);
+		if (num_selected > 0) {
+			for (int i = 0; i < num_selected; i++) {
+				gcry_free((void *)selected[i]->key);
+				gcry_free((void *)selected[i]);
+			}
+		}
 		return 1;
 	}
 	printf("Successfully built transaction data\n");
-	if (!segwit_tx || segwit_len == 0) {
-		fprintf(stderr, "Failure creating transaction ID\n");
-		for (int i = 0; i < num_utxos; i++) gcry_free(utxos[i].key);
-		if (num_selected > 0) gcry_free(selected);
-		gcry_free(change_back_key);
-		gcry_free(utxos);
-		return 1;
-	}
+	
 	// Create transaction ID
 	uint8_t txid[32];
 	double_sha256(segwit_tx, segwit_len, txid);
 	reverse_bytes(txid, 32);
+	gcry_free((void *)segwit_tx);
 	// Sign
-	result = sign_transaction(&raw_tx_hex, &selected, num_selected);
+	result = sign_transaction(&raw_tx_hex, selected, num_selected);
 	if (result != 0) {
 		fprintf(stderr, "Failure signing transaction\n");
-		for (int i = 0; i < num_utxos; i++) gcry_free(utxos[i].key);
-		if (num_selected > 0) gcry_free(selected);
-		gcry_free(change_back_key);
-		gcry_free(utxos);
+		if (num_selected > 0) {
+			for (int i = 0; i < num_selected; i++) {
+				gcry_free((void *)selected[i]->key);
+				gcry_free((void *)selected[i]);
+			}
+		}
+		gcry_free((void *)raw_tx_hex);
 		return 1;
 	}
+	if (num_selected > 0) {
+		for (int i = 0; i < num_selected; i++) {
+			gcry_free((void *)selected[i]->key);
+			gcry_free((void *)selected[i]);
+		}
+	}
+
 	printf("Successfully signed transaction data\n");
-	result = broadcast_transaction(&raw_tx_hex, &user->last_api_request);	
+	result = broadcast_transaction(raw_tx_hex, &user->last_api_request);	
 	if (result != 0) {
 		fprintf(stderr, "Failure broadcasting transaction\n");
-		for (int i = 0; i < num_utxos; i++) gcry_free(utxos[i].key);
-		if (num_selected > 0) gcry_free(selected);
-		gcry_free(change_back_key);
-		gcry_free(utxos);
+		gcry_free((void *)raw_tx_hex);
 		return 1;
 	}
 	printf("This is your transaction ID, (in reverse byte order as per conventional blockchain explorers' standards) track it on the blockchain:\n");
 	print_bytes_as_hex("TXID", txid, 32);
-	
+
+	fprintf(stderr, "Failure broadcasting transaction\n");
+	gcry_free((void *)raw_tx_hex);
 	return 0;
 }
 
@@ -1114,23 +1162,78 @@ int32 rbf_handle(User *user) {
 		}
 	}
 	rbf_data_t *rbf_data = malloc(sizeof(rbf_data_t));
-	if (query_rbf_transaction(tx_id, rbf_data, &user->last_api_request) != 0) {
+	if (query_rbf_transaction(tx_id, &rbf_data, &user->last_api_request) != 0) {
 		fprintf(stderr, "Unable to fetch transaction\n");
 		return 1;	
 	}
+
+for (int i = 0; i < rbf_data->num_inputs; i++) {
+printf("UTXO Txid: %s\n", rbf_data->utxos[i]->txid);
+printf("UTXO Vout: %d\n", (int)rbf_data->utxos[i]->vout);
+printf("UTXO Address: %s\n", rbf_data->utxos[i]->address);
+printf("UTXO amount: %lld\n", rbf_data->utxos[i]->amount);
+}
+printf("Num Outputs: %d\n", rbf_data->num_outputs);
+for (int i = 0; i < rbf_data->num_outputs; i++) {
+printf("Output Address: %s\n", rbf_data->outputs[i]->spk);
+printf("Output Value: %lld\n", rbf_data->outputs[i]->amount);
+}
+printf("Total Fee: %lld sats\n", rbf_data->old_fee);
+
+
+	// Uncomment this later, only blocking it for testing
+/*
 	if (rbf_data->unconfirmed == 0) {
 		fprintf(stderr, "This transaction is already confirmed.\n");
 		return 1;
 	}
-	printf("Found unconfirmed transaction\n");
+
+	printf("Found unconfirmed transaction.\n");
 	if (fetch_raw_tx_hex(tx_id, rbf_data, &user->last_api_request) != 0) {
 		fprintf(stderr, "Unable to fetch raw transaction hex data\n");
 		return 1;
 	}
+
 	if (check_rbf_sequence(rbf_data->raw_tx_hex, rbf_data->num_inputs) != 0) {
 		fprintf(stderr, "This transaction does not have RBF enabled on any of its inputs. Try a different transaction.\n");
 		return 1;
 	}
+*/
+	printf("What was the account index used to derive the UTXO input(s) for this transaction?\n"
+		"In order to build and sign a new replacement transaction, we will attempt to\n"
+		"locate and match a private key to your UTXO input(s)\n");
+	while (1) {
+		printf("Please enter account index (0 - 100) (must match account used to build original transaction)\n> ");
+		zero((void *)cmd, 256);
+		if (!fgets(cmd, 256, stdin)) {
+			fprintf(stderr, "Failure reading account number\n");
+			return 1;
+		}
+		cmd[strlen(cmd) - 1] = '\0';
+		int j = 0;
+		while (cmd[j] != '\0') {
+			cmd[j] = tolower((unsigned char)cmd[j]);
+			j++;
+		}
+		if (strcmp(cmd, "exit") == 0) exit_handle(user);
+		if (atoi(cmd) < 0 || atoi(cmd) > 100) {
+			fprintf(stderr, "Enter a valid account number between 0 - 100.\n");
+		} else {
+			rbf_data->account_index = (uint32_t)atoi(cmd);
+			printf("Got it. We will query account index %d to match your UTXO(s)' keys.\n", (int)rbf_data->account_index);
+			break;
+		}
+	}
+	account_t *account = add_account_to_user(user, rbf_data->account_index);
+	if (!account) {
+		fprintf(stderr, "Failure adding account\n");
+		return 1;
+	}
+	if (match_utxos_to_keys(user->master_key, rbf_data) != 0) {
+		fprintf(stderr, "Failure matching UTXOs to private keys.\n");
+		return 1;
+	}	
+	
 	if (calculate_rbf_fee(rbf_data, 2, &user->last_api_request) != 0) {
 		fprintf(stderr, "Failure calculating RBF fee\n");
 		return 1;

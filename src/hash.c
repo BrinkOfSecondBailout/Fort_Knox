@@ -106,19 +106,10 @@ void print_bytes_as_hex(const char *label, const uint8_t *data, size_t len) {
 }
 
 void bytes_to_hex(const uint8_t *data, size_t len, char *hex, size_t hex_len) {
-    for (size_t i = 0; i < len; i++) {
-        sprintf(hex + i * 2, "%02x", data[i]);
-    }
-    hex[len * 2] = '\0';
-    return;
-}
-
-void reverse_hex(char *hex, size_t len) {
-	if (!hex || len == 0) return;
-	uint8_t bytes[32];
-	hex_to_bytes(hex, bytes, 32);
-	reverse_bytes(bytes, 32);
-	bytes_to_hex(bytes, 32, hex, len);
+	for (size_t i = 0; i < len; i++) {
+		sprintf(hex + i * 2, "%02x", data[i]);
+	}
+	hex[len * 2] = '\0';
 	return;
 }
 
@@ -130,6 +121,16 @@ void reverse_bytes(uint8_t *data, size_t len) {
 		data[len - 1 - i] = temp;
 	}
 }
+
+void reverse_hex(char *hex, size_t len) {
+	if (!hex || len == 0) return;
+	uint8_t bytes[32];
+	hex_to_bytes(hex, bytes, 32);
+	reverse_bytes(bytes, 32);
+	bytes_to_hex(bytes, 32, hex, len);
+	return;
+}
+
 
 int is_s_low(const uint8_t *s, size_t s_len) {
 	uint8_t n_half[32] = {0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
@@ -156,31 +157,31 @@ void print_master_priv_key_hashed(const uint8_t *priv, size_t len) {
 
 // Helper: Print individual bits of a buffer for debugging
 void print_bits(const char *label, const uint8_t *buffer, size_t len) {
-    if (!label || !buffer) {
-        printf("Error: Invalid input to print_bits\n");
-        return;
-    }
-    printf("%s (%zu bytes):\n", label, len);
-    for (size_t i = 0; i < len; i++) {
-        printf("Byte %zu: ", i);
-        for (int j = 7; j >= 0; j--) { // Print MSB to LSB
-            printf("%d", (buffer[i] >> j) & 1);
-            if (j > 0) printf(" "); // Space between bits
-        }
-        printf(" (0x%02x)\n", buffer[i]);
-    }
+   	if (!label || !buffer) {
+        	printf("Error: Invalid input to print_bits\n");
+        	return;
+    	}
+    	printf("%s (%zu bytes):\n", label, len);
+    	for (size_t i = 0; i < len; i++) {
+        	printf("Byte %zu: ", i);
+        	for (int j = 7; j >= 0; j--) { // Print MSB to LSB
+            		printf("%d", (buffer[i] >> j) & 1);
+            		if (j > 0) printf(" "); // Space between bits
+        	}
+        	printf(" (0x%02x)\n", buffer[i]);
+    	}
 }
 
 // Helper: Print 5-bit groups in binary for checksum debugging
 void print_5bit_groups(const char *label, const uint8_t *groups, size_t num_groups) {
-    printf("%s (%zu groups):\n", label, num_groups);
-    for (size_t i = 0; i < num_groups; i++) {
-        printf("Group %zu: ", i);
-        for (int j = 4; j >= 0; j--) { // Print MSB to LSB for 5 bits
-            printf("%d", (groups[i] >> j) & 1);
-        }
-        printf(" (%u, char '%c')\n", groups[i], bech32_charset[groups[i]]);
-    }
+    	printf("%s (%zu groups):\n", label, num_groups);
+    	for (size_t i = 0; i < num_groups; i++) {
+        	printf("Group %zu: ", i);
+        	for (int j = 4; j >= 0; j--) { // Print MSB to LSB for 5 bits
+            		printf("%d", (groups[i] >> j) & 1);
+        	}
+        	printf(" (%u, char '%c')\n", groups[i], bech32_charset[groups[i]]);
+    	}
 }
 
 void convert_bits(uint8_t *out, size_t *outlen, const uint8_t *in, size_t inlen, int inbits, int outbits, int pad) {
