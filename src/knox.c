@@ -1299,9 +1299,11 @@ printf("Total Fee: %lld sats\n", rbf_data->old_fee);
 			}
 		}
 	} else {
-		printf("you do not have a change output, we will add a new change output in your transaction.\n");
+		printf("you do not have a change output in the previous transaction, we will add a new change output.\n");
 	}
-	if (build_rbf_transaction(rbf_data, change_output_included) != 0) {
+	char *raw_tx_hex = NULL;
+	uint8_t *segwit_tx = NULL;
+	if (build_rbf_transaction(user->master_key, rbf_data, change_output_included, &raw_tx_hex, &segwit_tx) != 0) {
 		fprintf(stderr, "Failure building RBF transaction\n");
 		return 1;
 	}	

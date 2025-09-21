@@ -709,12 +709,15 @@ int check_for_change_output(key_pair_t *master_key, rbf_data_t *rbf_data, int *c
 	return 0;
 }
 
-int build_rbf_transaction(rbf_data_t *rbf_data, int change_output_included) {
+
+
+int build_rbf_transaction(key_pair_t *master_key, rbf_data_t *rbf_data, int change_output_included, char **raw_tx_hex, uint8_t **segwit_tx) {
 	if (!rbf_data) {
 		fprintf(stderr, "Invalid inputs\n");
 		return 1;
 	}
 //printf("Raw Tx Hex: %s\n", rbf_data->raw_tx_hex);
+	int result;
 	long long input_sum = 0;
 	for (int i = 0; i < rbf_data->num_inputs; i++) {
 		if (rbf_data->utxos[i]->amount < 0) {
@@ -723,15 +726,174 @@ int build_rbf_transaction(rbf_data_t *rbf_data, int change_output_included) {
 		}	
 		input_sum += rbf_data->utxos[i]->amount;
 	}
-	long long amount = 0;
+	long long output_sum = 0;
 	for (int i = 0; i < rbf_data->num_outputs; i++) {
-		amount += rbf_data->outputs[i]->amount;
+		output_sum += rbf_data->outputs[i]->amount;
 	}
-	if (input_sum < amount + rbf_data->new_fee) {
-		fprintf(stderr, "Insufficient funds, %lld < %lld\n", input_sum, amount + rbf_data->new_fee);
+	if (input_sum < output_sum + rbf_data->new_fee) {
+		fprintf(stderr, "Insufficient funds, %lld < %lld\n", input_sum, output_sum + rbf_data->new_fee);
 		return 1;
 	}
+	// Estimate buffer size (extra for safety)
+	size_t max_size = 4 + 2 + 9 + num_selected * 40 + 9 + num_outputs * 25 + num_selected * 4 + 4 + 1000;
+	uint8_t *buffer = (uint8_t *)malloc(max_size);
+	if (!buffer) {
+		fprintf(stderr, "Failed to allocate tx buffer\n");
+		return 1;
+	}
+	size_t pos = 0;
+	// Version (2 for segwit)
+	encode_uint32_le(TX_VERSION, buffer + pos);
+	pos += 4;
+	// Marker and buffer[pos++] = 0x00;
+	buffer[pos++] = 0x00;
+	buffer[pos++] = 0x01;
+	// Input count
+	uint8_t varint_buf[9];
+	size_t varint_len;
+	if (encode_varint(rbf_data->num_inputs, varint_buf, &varint_len) != 0) {
+		fprintf(stderr, "Failed to encode input count\n");
+		free(buffer);
+		return 1;
+	}	
+	memcpy(buffer + pos, varint_buf, varint_len);
+	pos += varint_len;
+	// Inputs
+	for (int i = 0; i < rbf_data->num_inputs; i++) {
+		// TxId
+		uint8_t txid_bytes[32];
+		hex_to_bytes(rbf_data->utxos[i]->txid, txid_bytes, 32);
+		//reverse_bytes(txid_bytes, 32);
+		memcpy(buffer + pos, txid_bytes, 32);
+		pos += 32;
+		// vout
+		encode_uint32_le(rbf_data->utxos[i]->vout, buffer + pos);
+		pos += 4;
+		// ScriptSig (empty for P2WPKWH)
+		buffer[pos++] = 0x00;
+		// Sequence
+		encode_uint32_le(0xfffffffd, buffer + pos);
+		pos += 4;
+	}
+	// Output count
+	if (encode_varint((change_output_included ? rbf_data->num_outputs : rbf_data->num_outputs + 1), varint_buf, &varint_len) != 0) {
+		fprintf(stderr, "Failed to encode output count\n");
+		free(buffer);
+		return 1;
+	}
+	memcpy(buffer + pos, varint_buf, varint_len);
+	pos += varint_len;
+	// Outputs
+	// Recipient output
+	uint8_t script[25];
+	size_t script_len;
+	if (address_to_scriptpubkey(recipient, script, &script_len) != 0) {
+		fprintf(stderr, "Failed to convert recipient address\n");
+		free(buffer);
+		return 1;
+	}
+	// Encode amount to be sent
+	encode_uint64_le(amount, buffer + pos);
+	pos += 8;
+	// Encode scriptpubkey size
+	encode_uint32_le(script_len, buffer + pos);
+	pos++;
+	// Copy over scriptpubkey
+	memcpy(buffer + pos, script, script_len);
+	pos += script_len;
+	// Change output
 	
+
+
+	// Locktime
+	encode_uint32_le(0, buffer + pos);
+	pos += 4;
+
+	// Save segwit transaction (without the marker and flag) for txid after signage
+	*segwit_len = pos - 2;
+	*segwit_tx = (uint8_t *)malloc(*segwit_len);
+	if (!*segwit_tx) {
+		fprintf(stderr, "Error allocating segwit_tx\n");
+		free(buffer);
+		return 1;
+	}
+	memcpy(*segwit_tx, buffer, 4);
+	memcpy(*segwit_tx + 4, buffer + 6, pos - 6);
+print_bytes_as_hex("Segwit Tx", *segwit_tx, *segwit_len);
+
+	// Convert to hex
+	*raw_tx_hex = malloc(pos * 2 + 1);
+	if (!*raw_tx_hex) {
+		free(buffer);
+		free(*segwit_tx);
+		fprintf(stderr, "Failed to allocate raw_tx_hex\n");
+		return 1;
+	}
+	bytes_to_hex(buffer, pos, *raw_tx_hex, pos * 2 + 1);
+printf("Raw Tx Hex: %s\n", *raw_tx_hex);
+	free(buffer);
+
+
+
+
+
+
+
+
+
+
+
+	
+
+	uint8_t script[25];
+	size_t script_len = 0;
+	long long change = input_sum - (output_sum + rbf_data->new_fee);
+	if (change > 0) {
+		// Change output
+		if (!change_output_included) {
+			char change_address[ADDRESS_MAX_LEN];
+			key_pair_t *change_back_key = NULL;
+			change_back_key = gcry_malloc_secure(sizeof(key_pair_t));
+			if (!change_back_key) {
+				free(buffer);
+				fprintf(stderr, "Error allocating change key.\n");
+				return 1;
+			}
+			result = derive_from_master_to_account(master_key, rbf_data->account_index, change_back_key);
+			if (result != 0) {
+
+			}
+			result = derive_from_account_to_change(change_back_key, (uint32_t)1, change_back_key);
+			if (result != 0) {
+
+			}
+			result = derive_from_change_to_child(change_back_key, (uint32_t)1, change_back_key);
+			if (result != 0) {
+
+			}
+
+			char change_address[ADDRESS_MAX_LEN];
+			if (pubkey_to_address(change_back_key->key_pub_compressed, PUBKEY_LENGTH, change_address, ADDRESS_MAX_LEN) != 0) {
+				free(buffer);
+				fprintf(stderr, "Failed to convert change address\n");
+				return 1;
+			}
+			if (address_to_scriptpubkey(change_address, script, &script_len) != 0) {
+				free(buffer);
+				fprintf(stderr, "Failed to convert change scriptpubkey\n");
+				return 1;
+			}
+			// Encode amount to be sent back as change
+			encode_uint64_le(change, buffer + pos);
+			pos += 8;
+			// Encode scriptpubkey size
+			encode_uint32_le(script_len, buffer + pos);
+			pos++;
+			// Copy over scriptpubkey of your change address
+			memcpy(buffer + pos, script, script_len);
+			pos += script_len;
+		}
+	}
 
 	return 0;	
 }

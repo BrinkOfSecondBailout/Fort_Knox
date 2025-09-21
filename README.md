@@ -101,9 +101,9 @@ Command: exit
 
 ## Technical Details
 ### Wallet Structure
-- **HD Wallet**: Implements BIP-32 (HD wallets) and BIP-44 for address derivation:
-  - External chain: `m/44'/0'/0'/0/index` (for receiving funds).
-  - Change chain: `m/44'/0'/0'/1/index` (for change outputs).
+- **HD Wallet**: Implements BIP-32 (HD wallets) and BIP-173 for Native Segwit addresses:
+  - External chain: `m/84'/0'/0'/0/index` (for receiving funds).
+  - Change chain: `m/84'/0'/0'/1/index` (for change outputs).
   - Uses a gap limit of 20 addresses to check for usage.
 - **Address Type**: Supports P2WPKH (SegWit) with Bech32 addresses starting with `bc1q`.
 - **Key Management**: Stores private and public keys in `key_pair_t` structs, using Libgcrypt’s secure memory (`gcry_malloc_secure`).
