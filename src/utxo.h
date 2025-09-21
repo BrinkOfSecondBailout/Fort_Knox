@@ -19,6 +19,7 @@ typedef struct {
 
 typedef struct {
 	char spk[23]; // scriptpubkey = pubkeyhash + 2 bytes prefix + null
+	char address[ADDRESS_MAX_LEN];
 	long long amount;
 } rbf_output_t;
 
@@ -43,7 +44,8 @@ int address_to_scriptpubkey(const char *, uint8_t *, size_t *);
 int check_rbf_sequence(char *, int);
 int calculate_rbf_fee(rbf_data_t *, double, time_t *);
 int match_utxos_to_keys(key_pair_t *, rbf_data_t *);
-int build_rbf_transaction(rbf_data_t *);
+int check_for_change_output(key_pair_t *, rbf_data_t *, int *);
+int build_rbf_transaction(rbf_data_t *, int );
 int build_transaction(const char*, long long, utxo_t **, int, key_pair_t *, long long, char **, uint8_t **, size_t *, int);
 int construct_preimage(uint8_t *, size_t, utxo_t **, int, uint8_t *);
 int sign_transaction(char **, utxo_t **, int);

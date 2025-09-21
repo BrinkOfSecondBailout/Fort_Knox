@@ -62,7 +62,7 @@ void free_user(User *user) {
 		printf("User master key cleared...\n");
 	}
 	if (user->accounts_count > 0) {
-		for (size_t i = 0; i < user->accounts_capacity; i++) {
+		for (size_t i = 0; i < user->accounts_count; i++) {
 			if (user->accounts[i]) {
 				free(user->accounts[i]);
 			}
@@ -1175,7 +1175,8 @@ printf("UTXO amount: %lld\n", rbf_data->utxos[i]->amount);
 }
 printf("Num Outputs: %d\n", rbf_data->num_outputs);
 for (int i = 0; i < rbf_data->num_outputs; i++) {
-printf("Output Address: %s\n", rbf_data->outputs[i]->spk);
+printf("Output SPK: %s\n", rbf_data->outputs[i]->spk);
+printf("Output address: %s\n", rbf_data->outputs[i]->address);
 printf("Output Value: %lld\n", rbf_data->outputs[i]->amount);
 }
 printf("Total Fee: %lld sats\n", rbf_data->old_fee);
@@ -1253,7 +1254,7 @@ printf("Total Fee: %lld sats\n", rbf_data->old_fee);
 		}
 		if (strcmp(cmd, "exit") == 0) exit_handle(user);
 		if (strcmp(cmd, "yes") == 0) {
-			printf("Got it, let's proceed.\n");
+			printf("Got it, let's check if you already have a change output.\n");
 			break;
 		} else if (strcmp(cmd, "no") == 0) {
 			printf("Okay, cancelling RBF transaction.\n");
@@ -1263,7 +1264,44 @@ printf("Total Fee: %lld sats\n", rbf_data->old_fee);
 			continue;
 		}
 	}
-	if (build_rbf_transaction(rbf_data) != 0) {
+	int change_output_included;
+	if (check_for_change_output(user->master_key, rbf_data, &change_output_included) != 0) {
+		fprintf(stderr, "Failure checking for change output\n");
+		change_output_included = 0;	
+	}
+	printf("After checking 20 change addresses in account index %d, we found that\n", (int)rbf_data->account_index);
+	if (change_output_included) {
+		printf("you already have a change output as the last output of the previous transaction.\n"
+			"Is this correct? \nConfirm with 'yes' or 'no' > ");
+		while (1) {
+			zero((void *)cmd, 256);
+			if (!fgets(cmd, 256, stdin)) {
+				fprintf(stderr, "Error reading command\n");
+				return 1;
+			}
+			cmd[strlen(cmd) - 1] = '\0';
+			int i = 0;
+			while (cmd[i] != '\0') {
+				cmd[i] = tolower((unsigned char)cmd[i]);
+				i++;
+			}
+			if (strcmp(cmd, "exit") == 0) exit_handle(user);
+			if (strcmp(cmd, "yes") == 0) {
+				printf("Got it, we will modify the existing change output to accomodate the new fee.\n");
+				break;
+			} else if (strcmp(cmd, "no") == 0) {
+				printf("Okay, we will add a new change output to the transaction.\n");
+				change_output_included = 0;
+				break;
+			} else {
+				fprintf(stderr, "Invalid response, 'yes', 'no', or 'exit' only\n");
+				continue;
+			}
+		}
+	} else {
+		printf("you do not have a change output, we will add a new change output in your transaction.\n");
+	}
+	if (build_rbf_transaction(rbf_data, change_output_included) != 0) {
 		fprintf(stderr, "Failure building RBF transaction\n");
 		return 1;
 	}	

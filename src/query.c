@@ -291,9 +291,12 @@ int query_rbf_transaction(char *tx_id, rbf_data_t **rbf_data, time_t *last_reque
 	json_array_foreach(vout_array, vout_index, vout_item) {
 		rbf_output_t *output = malloc(sizeof(rbf_output_t));
 		json_t *s = json_object_get(vout_item, "scriptpubkey");
-		if (json_is_string(s)) {
+		json_t *addr = json_object_get(vout_item, "scriptpubkey_address");
+		if (json_is_string(s) && json_is_string(addr)) {
 			strncpy(output->spk, json_string_value(s), 22);
 			output->spk[22] = '\0';
+			strncpy(output->address, json_string_value(addr), ADDRESS_MAX_LEN - 1);
+			output->address[strlen(json_string_value(addr))] = '\0';
 		} else {
 			fprintf(stderr, "Unable to read output address\n");
 			for (int i = 0; i < (*rbf_data)->num_inputs; i++) free((*rbf_data)->utxos[i]);
