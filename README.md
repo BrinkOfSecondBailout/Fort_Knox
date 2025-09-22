@@ -20,6 +20,7 @@ This project is under active development, currently supporting basic mainnet ope
 - **Transaction Building**: Constructs P2WPKH SegWit transactions with recipient and change outputs.
 - **Transaction Signing**: Signs transactions using ECDSA on the secp256k1 curve via Libgcrypt.
 - **Transaction Broadcasting**: Sends transactions to the Bitcoin network via Blockchain.com’s `pushtx` API.
+- **Replace-By-Fee (RBF)**: Enables transaction replacement with sequence numbers < `0xffffffff`.
 - **Secure Memory**: Uses Libgcrypt’s secure memory for private keys and sensitive data.
 - **Address Usage Check**: Verifies if derived addresses have been used in transactions.
 
@@ -81,6 +82,7 @@ The wallet operates via a command-line interface with the following commands:
 - **`receive`**: Generate an unused address to receive bitcoin.
 - **`fee`**: Fetches the recommended fee rate from mempool.space.
 - **`send`**: Sends bitcoin to a recipient address, specifying amount and fee.
+- **`rbf`**: Replace Replace-By-Fee enabled transaction in mempool.
 - **`exit`**: Exits the program.
 
 ### Example Interaction
@@ -96,6 +98,9 @@ Enter recipient address: bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4
 Enter send amount in satoshis: 1000
 Enter fee in satoshis: 200
 Transaction sent successfully! Fee: 200 satoshis
+Command: rbf
+Enter transaction id: c6ec885618b657524ee69cbec422e6e2b048b8c278f13f0d415a4371ce4a2fcd
+Successfully replaced old transaction with RBF!
 Command: exit
 ```
 
@@ -140,7 +145,6 @@ To test on the Bitcoin testnet, modify the API endpoints:
 
 ## Future Improvements
 - **Testnet Integration**: Full support for testnet transactions and addresses.
-- **Replace-By-Fee (RBF)**: Enable transaction replacement with sequence numbers < `0xffffffff`.
 - **Fee Caching**: Cache fee rates to reduce API calls.
 - **GUI Interface**: Add a graphical interface for better user experience.
 - **Multi-signature Support**: Implement P2WSH or other script types.
