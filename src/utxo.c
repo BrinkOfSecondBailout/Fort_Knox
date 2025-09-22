@@ -601,123 +601,12 @@ int match_utxos_to_keys(key_pair_t *master_key, rbf_data_t *rbf_data) {
 	return 0;
 }
 
-int check_for_change_output(key_pair_t *master_key, rbf_data_t *rbf_data, int *change_output_included) {
-	if (!master_key || !rbf_data) {
-		fprintf(stderr, "Invalid inputs\n");
-		return 1;
-	}
-	rbf_output_t *output = rbf_data->outputs[rbf_data->num_outputs - 1];
-	if (!output) {
-		fprintf(stderr, "Invalid rbf output\n");
-		return 1;
-	}
-	char **addresses = NULL;
-	addresses = malloc(GAP_LIMIT * (sizeof(char *)));
-	if (!addresses) {
-		fprintf(stderr, "Failed to allocate addresses\n");
-		return 1;
-	}
-	int addr_count = 0;	
-	int result;
-	for (size_t i = 0; i < GAP_LIMIT; i++) {
-		// Allocate each of the 40 addresses and NULL it
-		char *address = (char *)malloc(ADDRESS_MAX_LEN);
-		if (!address) {
-			for (int j = 0; j < i; j++) free(addresses[j]);
-			free(addresses);
-			fprintf(stderr, "Error allocating address\n");
-			return 1;
-		}
-		address[0] = '\0';
-		addresses[i] = address;
-	}
-	key_pair_t *account_key = NULL;
-	account_key = gcry_malloc_secure(sizeof(key_pair_t));
-	if (!account_key) {
-		fprintf(stderr, "Error gcry_malloc_secure\n");
-		for (int j = 0; j < GAP_LIMIT; j++) free(addresses[j]);
-		free(addresses);
-		return 1;
-	}
-	result = derive_from_master_to_account(master_key, (uint32_t)rbf_data->account_index, account_key); 
-	if (result != 0) {
-		fprintf(stderr, "Failure deriving account key\n");
-		for (int j = 0; j < GAP_LIMIT; j++) free(addresses[j]);
-		free(addresses);
-		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
-		return 1;
-
-	}
-	key_pair_t *change_key = NULL;
-	change_key = gcry_malloc_secure(sizeof(key_pair_t));
-	if (!change_key) {
-		fprintf(stderr, "Error gcry_malloc_secure\n");
-		for (int j = 0; j < GAP_LIMIT; j++) free(addresses[j]);
-		free(addresses);
-		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
-		return 1;
-	}
-	result = derive_from_account_to_change(account_key, (uint32_t)1, change_key); // Change chain only
-	if (result != 0) {
-		fprintf(stderr, "Failure deriving child key\n");
-		for (int j = 0; j < GAP_LIMIT; j++) free(addresses[j]);
-		free(addresses);
-		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
-		return 1;
-	}
-	for (uint32_t child_index = 0; child_index < (uint32_t)GAP_LIMIT; child_index++) {
-		key_pair_t *child_key = NULL;
-		child_key = gcry_malloc_secure(sizeof(key_pair_t));
-		if (!child_key) {
-			fprintf(stderr, "Error gcry_malloc_secure\n");
-			for (int j = 0; j < GAP_LIMIT; j++) free(addresses[j]);
-			free(addresses);
-			zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
-			return 1;
-		}
-		result = derive_from_change_to_child(change_key, child_index, child_key);
-		if (result != 0) {
-			fprintf(stderr, "Failed to derive child key\n");
-			for (int j = 0; j < GAP_LIMIT; j++) free(addresses[j]);
-			free(addresses);
-			zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);
-			return 1;
-		}
-		result = pubkey_to_address(child_key->key_pub_compressed, PUBKEY_LENGTH, addresses[addr_count], ADDRESS_MAX_LEN);
-		if (result != 0) {
-			fprintf(stderr, "Failed to generate address\n");
-			for (int j = 0; j < GAP_LIMIT; j++) free(addresses[j]);
-			free(addresses);
-			zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);
-			return 1;
-		}
-		addr_count++;
-		zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
-	}
-	zero_and_gcry_free((void *)change_key, sizeof(key_pair_t));
-	zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
-	
-	for (int i = 0; i < addr_count; i++) {
-		if (strncmp(addresses[i], output->address, ADDRESS_MAX_LEN) == 0) {
-			printf("Change output found\n");
-			*change_output_included = 1;
-			return 0;
-		}
-	}
-	printf("Change output not found\n");
-	*change_output_included = 0;
-	return 0;
-}
-
-
-
-int build_rbf_transaction(key_pair_t *master_key, rbf_data_t *rbf_data, int change_output_included, char **raw_tx_hex, uint8_t **segwit_tx) {
+int build_rbf_transaction(rbf_data_t *rbf_data, char **raw_tx_hex, uint8_t **segwit_tx, size_t *segwit_len) {
 	if (!rbf_data) {
 		fprintf(stderr, "Invalid inputs\n");
 		return 1;
 	}
 //printf("Raw Tx Hex: %s\n", rbf_data->raw_tx_hex);
-	int result;
 	long long input_sum = 0;
 	for (int i = 0; i < rbf_data->num_inputs; i++) {
 		if (rbf_data->utxos[i]->amount < 0) {
@@ -730,12 +619,14 @@ int build_rbf_transaction(key_pair_t *master_key, rbf_data_t *rbf_data, int chan
 	for (int i = 0; i < rbf_data->num_outputs; i++) {
 		output_sum += rbf_data->outputs[i]->amount;
 	}
-	if (input_sum < output_sum + rbf_data->new_fee) {
-		fprintf(stderr, "Insufficient funds, %lld < %lld\n", input_sum, output_sum + rbf_data->new_fee);
+	long long fee_difference = rbf_data->new_fee - rbf_data->old_fee;
+printf("Fee Difference: %d\n", (int)fee_difference);
+	if (input_sum < output_sum + fee_difference) {
+		fprintf(stderr, "Insufficient funds, %lld < %lld\n", input_sum, output_sum + fee_difference);
 		return 1;
 	}
 	// Estimate buffer size (extra for safety)
-	size_t max_size = 4 + 2 + 9 + num_selected * 40 + 9 + num_outputs * 25 + num_selected * 4 + 4 + 1000;
+	size_t max_size = 4 + 2 + 9 + rbf_data->num_inputs * 40 + 9 + rbf_data->num_outputs * 25 + rbf_data->num_inputs * 4 + 4 + 1000;
 	uint8_t *buffer = (uint8_t *)malloc(max_size);
 	if (!buffer) {
 		fprintf(stderr, "Failed to allocate tx buffer\n");
@@ -760,14 +651,15 @@ int build_rbf_transaction(key_pair_t *master_key, rbf_data_t *rbf_data, int chan
 	pos += varint_len;
 	// Inputs
 	for (int i = 0; i < rbf_data->num_inputs; i++) {
+		utxo_t *utxo = rbf_data->utxos[i];
 		// TxId
 		uint8_t txid_bytes[32];
-		hex_to_bytes(rbf_data->utxos[i]->txid, txid_bytes, 32);
+		hex_to_bytes(utxo->txid, txid_bytes, 32);
 		//reverse_bytes(txid_bytes, 32);
 		memcpy(buffer + pos, txid_bytes, 32);
 		pos += 32;
 		// vout
-		encode_uint32_le(rbf_data->utxos[i]->vout, buffer + pos);
+		encode_uint32_le(utxo->vout, buffer + pos);
 		pos += 4;
 		// ScriptSig (empty for P2WPKWH)
 		buffer[pos++] = 0x00;
@@ -776,7 +668,7 @@ int build_rbf_transaction(key_pair_t *master_key, rbf_data_t *rbf_data, int chan
 		pos += 4;
 	}
 	// Output count
-	if (encode_varint((change_output_included ? rbf_data->num_outputs : rbf_data->num_outputs + 1), varint_buf, &varint_len) != 0) {
+	if (encode_varint(rbf_data->num_outputs, varint_buf, &varint_len) != 0) {
 		fprintf(stderr, "Failed to encode output count\n");
 		free(buffer);
 		return 1;
@@ -784,31 +676,33 @@ int build_rbf_transaction(key_pair_t *master_key, rbf_data_t *rbf_data, int chan
 	memcpy(buffer + pos, varint_buf, varint_len);
 	pos += varint_len;
 	// Outputs
-	// Recipient output
-	uint8_t script[25];
-	size_t script_len;
-	if (address_to_scriptpubkey(recipient, script, &script_len) != 0) {
-		fprintf(stderr, "Failed to convert recipient address\n");
-		free(buffer);
-		return 1;
+	for (size_t i = 0; i < rbf_data->num_outputs; i++) {
+		rbf_output_t *output = rbf_data->outputs[i];
+		uint8_t script[25];
+		size_t script_len;
+		if (address_to_scriptpubkey(output->address, script, &script_len) != 0) {
+			fprintf(stderr, "Failed to convert recipient address\n");
+			free(buffer);
+			return 1;
+		}
+		// Encode amount to be sent
+		if (i == rbf_data->num_outputs - 1) {
+			encode_uint64_le(output->amount - fee_difference, buffer + pos);	
+printf("Last Output's new amount: %lld\n", output->amount - fee_difference);
+		} else {
+			encode_uint64_le(output->amount, buffer + pos);
+		}
+		pos += 8;
+		// Encode scriptpubkey size
+		encode_uint32_le(script_len, buffer + pos);
+		pos++;
+		// Copy over scriptpubkey
+		memcpy(buffer + pos, script, script_len);
+		pos += script_len;
 	}
-	// Encode amount to be sent
-	encode_uint64_le(amount, buffer + pos);
-	pos += 8;
-	// Encode scriptpubkey size
-	encode_uint32_le(script_len, buffer + pos);
-	pos++;
-	// Copy over scriptpubkey
-	memcpy(buffer + pos, script, script_len);
-	pos += script_len;
-	// Change output
-	
-
-
 	// Locktime
 	encode_uint32_le(0, buffer + pos);
 	pos += 4;
-
 	// Save segwit transaction (without the marker and flag) for txid after signage
 	*segwit_len = pos - 2;
 	*segwit_tx = (uint8_t *)malloc(*segwit_len);
@@ -832,69 +726,6 @@ print_bytes_as_hex("Segwit Tx", *segwit_tx, *segwit_len);
 	bytes_to_hex(buffer, pos, *raw_tx_hex, pos * 2 + 1);
 printf("Raw Tx Hex: %s\n", *raw_tx_hex);
 	free(buffer);
-
-
-
-
-
-
-
-
-
-
-
-	
-
-	uint8_t script[25];
-	size_t script_len = 0;
-	long long change = input_sum - (output_sum + rbf_data->new_fee);
-	if (change > 0) {
-		// Change output
-		if (!change_output_included) {
-			char change_address[ADDRESS_MAX_LEN];
-			key_pair_t *change_back_key = NULL;
-			change_back_key = gcry_malloc_secure(sizeof(key_pair_t));
-			if (!change_back_key) {
-				free(buffer);
-				fprintf(stderr, "Error allocating change key.\n");
-				return 1;
-			}
-			result = derive_from_master_to_account(master_key, rbf_data->account_index, change_back_key);
-			if (result != 0) {
-
-			}
-			result = derive_from_account_to_change(change_back_key, (uint32_t)1, change_back_key);
-			if (result != 0) {
-
-			}
-			result = derive_from_change_to_child(change_back_key, (uint32_t)1, change_back_key);
-			if (result != 0) {
-
-			}
-
-			char change_address[ADDRESS_MAX_LEN];
-			if (pubkey_to_address(change_back_key->key_pub_compressed, PUBKEY_LENGTH, change_address, ADDRESS_MAX_LEN) != 0) {
-				free(buffer);
-				fprintf(stderr, "Failed to convert change address\n");
-				return 1;
-			}
-			if (address_to_scriptpubkey(change_address, script, &script_len) != 0) {
-				free(buffer);
-				fprintf(stderr, "Failed to convert change scriptpubkey\n");
-				return 1;
-			}
-			// Encode amount to be sent back as change
-			encode_uint64_le(change, buffer + pos);
-			pos += 8;
-			// Encode scriptpubkey size
-			encode_uint32_le(script_len, buffer + pos);
-			pos++;
-			// Copy over scriptpubkey of your change address
-			memcpy(buffer + pos, script, script_len);
-			pos += script_len;
-		}
-	}
-
 	return 0;	
 }
 
@@ -1477,7 +1308,7 @@ printf("Signed hex: %s\n", *raw_tx_hex);
 
 int broadcast_transaction(char *raw_tx_hex, time_t *last_request) {
 	CURL *curl = curl_easy_init();
-	if (!curl) return -1;
+	if (!curl) return 1;
 	printf("Broadcasting your transaction...\n");
 // Purposely typed wrong to test
 	char url[] = "https://000blockchain.info/pushtx";
@@ -1503,7 +1334,7 @@ int broadcast_transaction(char *raw_tx_hex, time_t *last_request) {
 	if (res != CURLE_OK) {
 		fprintf(stderr, "CURL request failed\n");
 		free(buffer.data);
-		return -1;
+		return 1;
 	}
 printf("Response: %s\n", buffer.data);
 	// Check response for success

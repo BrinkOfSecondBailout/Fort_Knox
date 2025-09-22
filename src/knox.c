@@ -1073,7 +1073,7 @@ int32 send_handle(User *user) {
 	uint8_t txid[32];
 	double_sha256(segwit_tx, segwit_len, txid);
 	reverse_bytes(txid, 32);
-	gcry_free((void *)segwit_tx);
+	free(segwit_tx);
 	// Sign
 	result = sign_transaction(&raw_tx_hex, selected, num_selected);
 	if (result != 0) {
@@ -1084,7 +1084,7 @@ int32 send_handle(User *user) {
 				gcry_free((void *)selected[i]);
 			}
 		}
-		gcry_free((void *)raw_tx_hex);
+		free(raw_tx_hex);
 		return 1;
 	}
 	if (num_selected > 0) {
@@ -1098,14 +1098,12 @@ int32 send_handle(User *user) {
 	result = broadcast_transaction(raw_tx_hex, &user->last_api_request);	
 	if (result != 0) {
 		fprintf(stderr, "Failure broadcasting transaction\n");
-		gcry_free((void *)raw_tx_hex);
+		free(raw_tx_hex);
 		return 1;
 	}
 	printf("This is your transaction ID, (in reverse byte order as per conventional blockchain explorers' standards) track it on the blockchain:\n");
 	print_bytes_as_hex("TXID", txid, 32);
-
-	fprintf(stderr, "Failure broadcasting transaction\n");
-	gcry_free((void *)raw_tx_hex);
+	free(raw_tx_hex);
 	return 0;
 }
 
@@ -1175,7 +1173,6 @@ printf("UTXO amount: %lld\n", rbf_data->utxos[i]->amount);
 }
 printf("Num Outputs: %d\n", rbf_data->num_outputs);
 for (int i = 0; i < rbf_data->num_outputs; i++) {
-printf("Output SPK: %s\n", rbf_data->outputs[i]->spk);
 printf("Output address: %s\n", rbf_data->outputs[i]->address);
 printf("Output Value: %lld\n", rbf_data->outputs[i]->amount);
 }
@@ -1188,7 +1185,7 @@ printf("Total Fee: %lld sats\n", rbf_data->old_fee);
 		fprintf(stderr, "This transaction is already confirmed.\n");
 		return 1;
 	}
-
+*/
 	printf("Found unconfirmed transaction.\n");
 	if (fetch_raw_tx_hex(tx_id, rbf_data, &user->last_api_request) != 0) {
 		fprintf(stderr, "Unable to fetch raw transaction hex data\n");
@@ -1199,7 +1196,7 @@ printf("Total Fee: %lld sats\n", rbf_data->old_fee);
 		fprintf(stderr, "This transaction does not have RBF enabled on any of its inputs. Try a different transaction.\n");
 		return 1;
 	}
-*/
+	printf("Transaction has RBF enabled, proceeding...\n");
 	printf("What was the account index used to derive the UTXO input(s) for this transaction?\n"
 		"In order to build and sign a new replacement transaction, we will attempt to\n"
 		"locate and match a private key to your UTXO input(s)\n");
@@ -1264,16 +1261,15 @@ printf("Total Fee: %lld sats\n", rbf_data->old_fee);
 			continue;
 		}
 	}
-	int change_output_included;
-	if (check_for_change_output(user->master_key, rbf_data, &change_output_included) != 0) {
-		fprintf(stderr, "Failure checking for change output\n");
-		change_output_included = 0;	
-	}
-	printf("After checking 20 change addresses in account index %d, we found that\n", (int)rbf_data->account_index);
-	if (change_output_included) {
-		printf("you already have a change output as the last output of the previous transaction.\n"
-			"Is this correct? \nConfirm with 'yes' or 'no' > ");
+	if (rbf_data->num_outputs > 1) {
+		printf("Your previous transaction had %d total recipients. Please confirm that you only had %d intended\n"
+			"recipient address(es), and that the last one is your change address.\n"
+			"This will effectively decrease the last recipient's (your change address) output amount\n"
+			"in order to pay the difference in miner's fee.\n"
+			"(Explanation: If a transaction's input(s) exceeds the output(s), there is always an automatic 'change address'\n"
+			"generated to send the remaining sats back to you.\n", (int)rbf_data->num_outputs, (int)rbf_data->num_outputs - 1);
 		while (1) {
+			printf("Confirm with 'yes' or 'no'> ");
 			zero((void *)cmd, 256);
 			if (!fgets(cmd, 256, stdin)) {
 				fprintf(stderr, "Error reading command\n");
@@ -1287,27 +1283,93 @@ printf("Total Fee: %lld sats\n", rbf_data->old_fee);
 			}
 			if (strcmp(cmd, "exit") == 0) exit_handle(user);
 			if (strcmp(cmd, "yes") == 0) {
-				printf("Got it, we will modify the existing change output to accomodate the new fee.\n");
+				printf("Got it, we will modify the existing change output (the last recipient address) to accomodate the new fee.\n");
 				break;
 			} else if (strcmp(cmd, "no") == 0) {
-				printf("Okay, we will add a new change output to the transaction.\n");
-				change_output_included = 0;
-				break;
+				printf("Unfortunately, that means your input UTXO(s) will not have enough sats to cover the additional fee.\n"
+					"Your old transaction will remain in the mempool for around 2 weeks, and if it's not picked up\n"
+					"by a miner to be mined into a block, it will simply 'fall off' of no consequence to you.\n"
+					"In the meantime, you can make a new transaction, but not with those same UTXOs that are currently\n"
+					"'stuck' in the mempool.\n\n");
+				printf("Another valid option is to simply decrease the amount sent to the last recipient address of your original\n"
+					"transaction. The difference in fee will be subtracted from that output in order to pay the miners.\n"
+					"If you want this option, restart the 'rbf' command again and say 'yes' to decreasing the last recipient's\n"
+					"output amount to pay the miner's fee.\n");
+				return 1; 	
+				
 			} else {
 				fprintf(stderr, "Invalid response, 'yes', 'no', or 'exit' only\n");
 				continue;
 			}
 		}
 	} else {
-		printf("you do not have a change output in the previous transaction, we will add a new change output.\n");
-	}
+		printf("It seems you only have 1 output in the original transaction. You can still make a new RBF replacement transaction\n"
+			"if you decrease the output amount for this recipient in order to pay the difference in fees.\n"
+			"Would you still like to proceed? >");
+		while (1) {
+			printf("Type 'yes' or 'no'> ");
+			zero((void *)cmd, 256);
+			if (!fgets(cmd, 256, stdin)) {
+				fprintf(stderr, "Error reading command\n");
+				return 1;
+			}
+			cmd[strlen(cmd) - 1] = '\0';
+			int i = 0;
+			while (cmd[i] != '\0') {
+				cmd[i] = tolower((unsigned char)cmd[i]);
+				i++;
+			}
+			if (strcmp(cmd, "exit") == 0) exit_handle(user);
+			if (strcmp(cmd, "yes") == 0) {
+				printf("Got it, we will modify the existing change output (the last recipient address) to accomodate the new fee.\n");
+				break;
+			} else if (strcmp(cmd, "no") == 0) {
+				printf("Unfortunately, that means your input UTXO(s) will not have enough sats to cover the additional fee.\n"
+					"Your old transaction will remain in the mempool for around 2 weeks, and if it's not picked up\n"
+					"by a miner to be mined into a block, it will simply 'fall off' of no consequence to you.\n"
+					"In the meantime, you can make a new transaction, but not with those same UTXOs that are currently\n"
+					"'stuck' in the mempool.\n\n");
+				printf("Another valid option is to simply decrease the amount sent to the last recipient address of your original\n"
+					"transaction. The difference in fee will be subtracted from that output in order to pay the miners.\n"
+					"If you want this option, restart the 'rbf' command again and say 'yes' to decreasing the last recipient's\n"
+					"output amount to pay the miner's fee.\n");
+				return 1; 	
+			} else {
+				fprintf(stderr, "Invalid response, 'yes', 'no', or 'exit' only\n");
+				continue;
+			}
+		}
+	
+	}	
 	char *raw_tx_hex = NULL;
 	uint8_t *segwit_tx = NULL;
-	if (build_rbf_transaction(user->master_key, rbf_data, change_output_included, &raw_tx_hex, &segwit_tx) != 0) {
-		fprintf(stderr, "Failure building RBF transaction\n");
+	size_t segwit_len = 0;
+	if (build_rbf_transaction(rbf_data, &raw_tx_hex, &segwit_tx, &segwit_len) != 0) {
+		fprintf(stderr, "Failure building RBF transaction.\n");
 		return 1;
-	}	
-	
+	}
+	printf("Successfully built new RBF transaction data.\n");
+	// Create transaction ID
+	uint8_t txid[32];
+	double_sha256(segwit_tx, segwit_len, txid);
+	reverse_bytes(txid, 32);
+	free(segwit_tx);
+	// Sign
+	if (sign_transaction(&raw_tx_hex, rbf_data->utxos, rbf_data->num_inputs) != 0) {
+		fprintf(stderr, "Failure signing RBF transaction.\n");
+		free(raw_tx_hex);
+		return 1;
+	}
+	printf("Successfully signed transaction data\n");
+	if (broadcast_transaction(raw_tx_hex, &user->last_api_request) != 0) {
+		fprintf(stderr, "Failure broadcasting transaction\n");
+		free(raw_tx_hex);
+		return 1;
+	}
+	printf("Broadcast successful.\n");
+	printf("This is your transaction ID, (in reverse byte order as per conventional blockchain explorers' standards) track it on the blockchain:\n");
+	print_bytes_as_hex("TXID", txid, 32);
+	free(raw_tx_hex);
 	return 0;
 }
 

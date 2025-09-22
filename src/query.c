@@ -293,8 +293,6 @@ int query_rbf_transaction(char *tx_id, rbf_data_t **rbf_data, time_t *last_reque
 		json_t *s = json_object_get(vout_item, "scriptpubkey");
 		json_t *addr = json_object_get(vout_item, "scriptpubkey_address");
 		if (json_is_string(s) && json_is_string(addr)) {
-			strncpy(output->spk, json_string_value(s), 22);
-			output->spk[22] = '\0';
 			strncpy(output->address, json_string_value(addr), ADDRESS_MAX_LEN - 1);
 			output->address[strlen(json_string_value(addr))] = '\0';
 		} else {
