@@ -3,7 +3,7 @@
 ![Thumbnail image](img/knox.png)
 
 ## Overview
-**Forty-Fort Knox** is a lightweight, command-line Bitcoin wallet implemented in C, designed for secure and straightforward Bitcoin transaction management. It leverages **BIP-32** and **BIP-44** for hierarchical deterministic (HD) wallet generation, supports **P2WPKH (SegWit)** **BIP-141** transactions, and integrates with public APIs for real-time blockchain data. The wallet prioritizes security using Libgcrypt for cryptographic operations and simplicity for educational purposes.
+**Forty-Fort Knox** is a lightweight, command-line Bitcoin wallet implemented in C, designed for secure and straightforward Bitcoin transaction management. It leverages **BIP-32**, **BIP-39** and **BIP-44** for hierarchical deterministic (HD) wallet generation, supports **P2WPKH (SegWit)** **BIP-141** **BIP-173** transactions, and integrates with public APIs for real-time blockchain data. The wallet prioritizes security using Libgcrypt for cryptographic operations and simplicity for educational purposes.
 
 This project is under active development, currently supporting basic mainnet operations with plans for testnet support and advanced features like Replace-By-Fee (RBF), UTXO consolidations...etc
 
@@ -42,7 +42,7 @@ To build and run Fort Knox, you need the following:
    - On **Ubuntu/Debian**:
      ```bash
      sudo apt-get update
-     sudo apt-get install libgcrypt20-dev libcurl4-openssl-dev libjansson-dev
+     sudo apt-get install libgcrypt20-dev pkg-config libcurl4-openssl-dev libjansson-dev
      ```
    - On **macOS** (using Homebrew):
      ```bash
@@ -61,7 +61,7 @@ To build and run Fort Knox, you need the following:
 
 3. **Compile the Wallet**:
    ```bash
-   gcc -o knox knox.c crypt.c wallet.c mnemonic.c utxo.c hash.c $(pkg-config --cflags --libs jansson libcurl libgcrypt) -lm
+   gcc -o knox knox.c crypt.c wallet.c mnemonic.c utxo.c hash.c query.c memory.c commands.c $(pkg-config --cflags --libs jansson libcurl libgcrypt) -lm
    ```
    or just use the Makefile already provided
    ```bash
@@ -73,6 +73,8 @@ Run the wallet with:
 ```bash
 ./knox
 ```
+## GCRYPT Note
+Ensure you adjust #NEED_LIGCRYPT_VERSION to the newest up to date gcrypt version in "wallet.h"
 
 The wallet operates via a command-line interface with the following commands:
 
@@ -120,17 +122,11 @@ Command: exit
 - **Dependencies**: Relies on well-tested libraries: Libgcrypt (crypto), libcurl (HTTP), jansson (JSON).
 
 ## Testing
-### Testnet Support
-To test on the Bitcoin testnet, modify the API endpoints:
-- UTXOs: `https://testnet.blockchain.info/unspent`
-- Broadcast: `https://testnet.blockchain.info/pushtx`
-- Fee: `https://mempool.space/testnet/api/v1/fees/recommended`
-- Use Bech32 addresses with `tb1q` prefix.
-
+- **Test Vectors**: Provided are test vectors in test_vectors.c, compile and run it to make sure the cryptographic calculations are correct.
 ### Running Tests
 1. Compile the test file:
    ```bash
-   gcc -o test_vectors test_vectors.c crypt.c mnemonic.c wallet.c utxo.c hash.c $(pkg-config --cflags --libs libgcrypt jansson) -lm
+   gcc -o test_vectors test_vectors.c crypt.c mnemonic.c wallet.c utxo.c hash.c query.c memory.c commands.c $(pkg-config --cflags --libs libgcrypt jansson) -lm
    ```
    or just use the Makefile already provided
    ```bash
@@ -149,6 +145,7 @@ To test on the Bitcoin testnet, modify the API endpoints:
 - **GUI Interface**: Add a graphical interface for better user experience.
 - **Multi-signature Support**: Implement P2WSH or other script types.
 - **Serialization**: Persist wallet state (e.g., seed, child_key_count) to a file.
+- **Lightning**: Layer 2 high speed transactions.
 
 ## Contributing
 Contributions are welcome! To contribute:
