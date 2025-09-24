@@ -140,7 +140,7 @@ long long query_utxos(char **addresses, int num_addresses_and_keys, utxo_t ***ut
 	return total_balance;
 }
 
-long long get_utxos(key_pair_t *master_key, utxo_t ***utxos, int *num_utxos, uint32_t account_index, time_t *last_request) {
+long long get_utxos_balance(key_pair_t *master_key, utxo_t ***utxos, int *num_utxos, uint32_t account_index, time_t *last_request) {
 	if (!master_key) {
 		fprintf(stderr, "Invalid inputs\n");
 		return 1;

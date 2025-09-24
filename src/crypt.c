@@ -2,7 +2,7 @@
 #include "common.h"
 #include "crypt.h"
 
-#define MEM_POOL_CAPACITY 131072 // 128 kb
+#define MEM_POOL_CAPACITY 262144 // 256 kb
 
 gcry_error_t init_gcrypt() {
 	gcry_error_t err = GPG_ERR_NO_ERROR;

@@ -31,11 +31,6 @@ typedef struct {
 	uint8_t depth; // how many derivations deep from master key
 } key_pair_t ;
 
-typedef struct {
-	uint32_t account_index;
-	uint32_t used_indexes_count;
-} account_t;
-
 int serialize_extended_key(key_pair_t *, key_pair_t *, int, char **);
 int key_to_pubkeyhash(key_pair_t *key, uint8_t *pubkeyhash);
 int pubkeyhash_to_address(const uint8_t *, size_t, char *, size_t);
@@ -46,4 +41,6 @@ int derive_from_change_to_child(const key_pair_t *, uint32_t, key_pair_t *);
 int derive_from_account_to_change(const key_pair_t *, uint32_t, key_pair_t *);
 int derive_from_master_to_account(const key_pair_t *, uint32_t, key_pair_t *);
 int derive_from_master_to_coin(const key_pair_t *, key_pair_t *);
+int derive_from_master_to_child(const key_pair_t *, uint32_t, uint32_t, uint32_t, key_pair_t *);
+int generate_receive_address(const key_pair_t *, char *, uint32_t, uint32_t);
 #endif

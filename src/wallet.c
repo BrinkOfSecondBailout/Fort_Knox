@@ -523,7 +523,7 @@ int derive_from_master_to_coin(const key_pair_t *master_key, key_pair_t *coin_ke
 	key_pair_t *purpose_key = NULL;
 	purpose_key = gcry_malloc_secure(sizeof(key_pair_t));
 	if (!purpose_key) {
-		fprintf(stderr, "Error gcry malloc for child key\n");
+		fprintf(stderr, "Error gcry malloc for purpose key\n");
 		return 1;
 	}
 	if (derive_child_key(master_key, HARD_FLAG | 84, purpose_key) != 0) { // m/84'
@@ -540,3 +540,81 @@ int derive_from_master_to_coin(const key_pair_t *master_key, key_pair_t *coin_ke
 	return 0;
 }
 
+int derive_from_master_to_child(const key_pair_t *master_key, uint32_t account_index, uint32_t change_index, uint32_t child_index, key_pair_t *child_key) {
+	key_pair_t *account_key = NULL;
+	account_key = gcry_malloc_secure(sizeof(key_pair_t));
+	if (!account_key) {
+		fprintf(stderr, "Failure allocating account key\n");
+		return 1;
+	}
+	if (derive_from_master_to_account(master_key, account_index, account_key) != 0) {
+		fprintf(stderr, "Failure deriving from master to account\n");
+		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
+		return 1;
+	}
+	key_pair_t *change_key = NULL;
+	change_key = gcry_malloc_secure(sizeof(key_pair_t));
+	if (!change_key) {
+		fprintf(stderr, "Failure allocating change key\n");
+		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
+		return 1;
+	}
+	if (derive_from_account_to_change(account_key, change_index, change_key) != 0) {
+		fprintf(stderr, "Failure deriving from account to change\n");
+		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)change_key, (void *)account_key, NULL);	
+		return 1;
+	}
+	if (derive_from_change_to_child(change_key, child_index, child_key) != 0) {
+		fprintf(stderr, "Failure deriving from change to child\n");
+		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)change_key, (void *)account_key, NULL);	
+		return 1;
+	}
+	return 0;
+}
+
+int generate_receive_address(const key_pair_t *master_key, char *address, uint32_t account_index, uint32_t child_index) {
+	// Work our way down the path to m/84'/0'/0'/account
+	key_pair_t *account_key;
+	account_key = gcry_malloc_secure(sizeof(key_pair_t));
+	if (!account_key) {
+		fprintf(stderr, "Error gcry_malloc_secure\n");
+		return 1;
+	}
+	if (derive_from_master_to_account(master_key, account_index, account_key) != 0) { // m/84'/0'/account'
+		fprintf(stderr, "Failed to derive account key\n");
+		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
+		return 1;
+	}
+	key_pair_t *change_key;
+	change_key = gcry_malloc_secure(sizeof(key_pair_t));
+	if (!change_key) {
+		fprintf(stderr, "Error gcry_malloc_secure\n");
+		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
+		return 1;
+	}
+	if (derive_from_account_to_change(account_key, (uint32_t)0, change_key) != 0) {
+		fprintf(stderr, "Failed to derive change key\n");
+		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
+		return 1;
+	}
+	key_pair_t *child_key;
+	child_key = gcry_malloc_secure(sizeof(key_pair_t));
+	if (!child_key) {
+		fprintf(stderr, "Error gcry_malloc_secure\n");
+		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
+		return 1;
+	}
+	if (derive_from_change_to_child(change_key, child_index, child_key) != 0) {
+		fprintf(stderr, "Failed to derive child key\n");
+		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);
+		return 1;
+	}
+	if (pubkey_to_address(child_key->key_pub_compressed, PUBKEY_LENGTH, address, ADDRESS_MAX_LEN) != 0) {
+		fprintf(stderr, "Failed to generate receive address.\n");
+		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);	
+		return 1;
+	}
+	// Clean up intermediate keys
+	zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);	
+	return 0;
+}
