@@ -7,7 +7,7 @@
 #define SATS_PER_BTC 100000000.0
 #define CURVE_ORDER "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141"
 #define HARD_FLAG 0x80000000
-#define SECS_PER_REQUEST 20
+#define SECS_PER_REQUEST 15
 
 #define ACCOUNTS_CAPACITY 3
 #define INITIAL_USED_INDEXES_CAPACITY 20
@@ -20,9 +20,8 @@
 #define ADDRESS_MAX_LEN 100
 #define BECH32_VALUES_MAX 100
 
-typedef struct key_pair key_pair_t;
 
-struct key_pair {
+typedef struct {
 	uint8_t chain_code[CHAINCODE_LENGTH];
 	uint8_t key_priv[PRIVKEY_LENGTH];
 	uint8_t key_priv_extended[PRIVKEY_LENGTH + CHAINCODE_LENGTH];
@@ -30,7 +29,7 @@ struct key_pair {
 	uint8_t key_pub_extended[PUBKEY_LENGTH + CHAINCODE_LENGTH];
 	uint32_t key_index;
 	uint8_t depth; // how many derivations deep from master key
-};
+} key_pair_t ;
 
 typedef struct {
 	uint32_t account_index;

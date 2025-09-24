@@ -6,10 +6,6 @@
 extern const char *base58_chars;
 extern const char *bech32_charset;
 
-void zero(void *, size_t);
-void zero_multiple(void *, ...);
-void zero_and_gcry_free(void *, size_t);
-void zero_and_gcry_free_multiple(size_t, void *, ...);
 int decimal_to_int_le(const char *, size_t, int *);
 int hex_to_int(const char *, size_t, int *);
 void hex_to_bytes(const char *, uint8_t *, size_t);

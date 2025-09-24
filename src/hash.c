@@ -7,38 +7,6 @@
 const char *base58_chars = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const char *bech32_charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
 
-void zero(void *buf, size_t size) {
-	if (!buf) return;
-	memset(buf, 0, size);
-	return;
-}
-
-void zero_multiple(void *buf, ...) {
-	va_list args;
-	va_start(args, buf);
-	void *ptr;
-	while ((ptr = va_arg(args, void *)) != NULL) {
-		zero(ptr, sizeof(*ptr));
-	}
-	va_end(args);
-}
-
-void zero_and_gcry_free(void *buf, size_t size) {
-	if (!buf) return;
-	zero(buf, size);
-	gcry_free(buf);
-}
-
-void zero_and_gcry_free_multiple(size_t size, void *buf, ...) {
-	va_list args;
-	va_start(args, buf);
-	void *ptr;
-	while ((ptr = va_arg(args, void *)) != NULL) {
-		zero(ptr, sizeof(*ptr));
-		gcry_free(buf);
-	}
-	va_end(args);
-}
 
 int decimal_to_int_le(const char *decimal, size_t len, int *value) {
 	if (!decimal || !value) {
@@ -206,12 +174,12 @@ void convert_bits(uint8_t *out, size_t *outlen, const uint8_t *in, size_t inlen,
 // Checksum
 uint32_t bech32_polymod(const uint8_t *values, size_t len) {
     static const uint32_t gen[] = {0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3};
-    uint32_t chk = 1;
+    uint32_t chk = 1U;
     for (size_t i = 0; i < len; i++) {
-        uint32_t b = chk >> 25;
+	uint32_t top = (chk >> 25);
         chk = (chk & 0x1ffffff) << 5 ^ values[i];
         for (int j = 0; j < 5; j++) {
-            chk ^= ((b >> j) & 1) ? gen[j] : 0;
+            chk ^= ((top >> j) & 1) ? gen[j] : 0;
         }
     }
     return chk;
@@ -233,6 +201,7 @@ char *base58_encode(const uint8_t *data, size_t data_len) {
 	// Convert to big int
 	size_t size = data_len * 138 / 100 + 1; // Approximate
 	uint8_t *temp = calloc(size, 1);
+	if (!temp) return NULL;
 	for (size_t i = 0; i < data_len; i++) {
 		int carry = data[i];
 		for (size_t j = 0; j < size; j++) {
@@ -243,6 +212,10 @@ char *base58_encode(const uint8_t *data, size_t data_len) {
 	}
 	// Encode to chars
 	char *result = malloc(size + zeros + 1);
+	if (!result) {
+		free(temp);
+		return NULL;
+	}
 	memset(result, '1', zeros);
 	size_t pos = zeros;
 	for (int i = size - 1; i >= 0; i--) {

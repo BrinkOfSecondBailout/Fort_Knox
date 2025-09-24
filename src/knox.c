@@ -8,6 +8,8 @@
 #include "utxo.h"
 #include "hash.h"
 #include "query.h"
+#include "memory.h"
+#include "commands.h"
 
 void print_logo() {
 	FILE *logo = fopen("logo.txt", "r");
@@ -19,7 +21,7 @@ void print_logo() {
 	}
 	printf(RESET);
 	fclose(logo);
-	printf(RED"***For educational purposes ONLY***\n"RESET);
+	print_red("***For educational purposes ONLY***");
 	printf("***This is a HOT wallet built by one developer you should not 'trust', as per the bitcoin ethos***\n");
 	printf("***Exercise extreme cautions. Only TINY (if any) amounts of sats should be sent to any wallet derived by this app***\n"
 		"***Until much further rigorous testings and verifications***\n"
@@ -28,22 +30,23 @@ void print_logo() {
 		"its public addresses will always start with 'bc1q'.\n");
 
 	printf("\n...and so with that being said...\n\n");
-	printf(GREEN"\n'Wake up Neo...'\n"RESET);
+	print_green("'Wake up Neo...'");
 	return;
 }
 
 int init_user(User *user) {
 	if (!user) return 1;
 	zero((void *)user, sizeof(User));
-	user->accounts = malloc(ACCOUNTS_CAPACITY * sizeof(account_t *));
+	user->has_master_key = 0;
+	user->accounts = calloc(ACCOUNTS_CAPACITY, sizeof(account_t *));
 	if (!user->accounts) {
-		zero_and_gcry_free((void *)user, sizeof(User));
+		gcry_free(user->master_key);
 		return 1;
 	}
 	user->accounts_count = 0;
 	user->accounts_capacity = ACCOUNTS_CAPACITY;
 	user->last_api_request = 0;
-	user->last_price_cached = 0;
+	user->last_price_cached = 0.0;
 	double price = get_bitcoin_price(&user->last_api_request);
 	if (price > 0.0) {
 		user->last_price_cached = price;
@@ -55,7 +58,7 @@ int init_user(User *user) {
 void free_user(User *user) {
 	if (!user) return;
 	printf("Cleaning up secured memory...\n");
-	if (user->master_key) {
+	if (user->has_master_key) {
 		zero((void *)user->master_key, sizeof(key_pair_t));
 		gcry_free(user->master_key);
 		user->master_key = NULL;
@@ -65,6 +68,7 @@ void free_user(User *user) {
 		for (size_t i = 0; i < user->accounts_count; i++) {
 			if (user->accounts[i]) {
 				free(user->accounts[i]);
+				user->accounts[i] = NULL;
 			}
 		}
 	}
@@ -79,7 +83,7 @@ void free_user(User *user) {
 	user->last_api_request = 0;
 	user->last_price_cached = 0.0;
 	gcry_free(user);
-	printf("User data successfully cleared...\n");
+	printf("User data successfully cleared and free.\n");
 	return;
 }
 
@@ -106,6 +110,11 @@ account_t *add_account_to_user(User *user, uint32_t account_index) {
 	}
 	// Create new account
 	account_t *new_account = malloc(sizeof(account_t));
+	if (!new_account) {
+		fprintf(stderr, "Error allocating new account\n");
+		return NULL;
+	}
+	zero((void *)new_account, sizeof(account_t));
 	new_account->account_index = account_index;
 	new_account->used_indexes_count = 0;
 	// Add account to user accounts
@@ -114,7 +123,7 @@ account_t *add_account_to_user(User *user, uint32_t account_index) {
 	return new_account;
 }	
 	
-void print_commands() {
+void print_menu() {
 	fprintf(stdout, "Welcome bitcoiner! What is your command?\n\n"
 	"- price					Most recent bitcoin price\n"
 	"- new					Create a new bitcoin wallet\n"
@@ -153,7 +162,7 @@ int32 exit_handle(User *user) {
 }
 
 int has_wallet(User *user) {
-	if (user->seed[0] != 0) return 1;
+	if (user->has_master_key) return 1;
 	return 0; 
 }
 
@@ -172,29 +181,19 @@ int32 price_handle(User *user) {
 
 int32 new_handle(User *user) {
 	char cmd[256];
+	int result;
 	if (has_wallet(user)) {
-		while (1) {
-			printf("You already have a wallet set in this current account.\n"
-				"Would you like to generate a new one anyways and overwrite the existing one?\n");
-			zero((void *)cmd, sizeof(cmd));
-			if (!fgets(cmd, sizeof(cmd), stdin)) {
-				fprintf(stderr, "fgets() failure\n");
-			}
-			cmd[strlen(cmd) - 1] = '\0';
-			int i = 0;
-			while (cmd[i] != '\0') {
-				cmd[i] = tolower((unsigned char)cmd[i]);
-				i++;
-			}
-			if (strcmp(cmd, "exit") == 0) exit_handle(user);
-			if ((strcmp(cmd, "yes") != 0) && (strcmp(cmd, "no") != 0)) {
-				printf("Invalid answer, must type 'yes' or 'no'.\n");
-			} else if (strcmp(cmd, "no") == 0) {
-				printf("Got it, we'll keep the existing wallet for now.\n");
-				return 1;
-			} else if (strcmp(cmd, "yes") == 0) {
-				break;
-			}
+		result = command_loop(cmd, 256, "You already have a wallet set in this current account.\n"
+					"Would you like to generate a new one anyways and overwrite?\n"
+					"Type 'yes' or 'no'\n", 
+					"yes", 
+					"no", 
+					"Okay, overwriting old wallet.", 
+					"Got it, we'll keep existing wallet.");
+		if (result < 0) {
+			exit_handle(user);
+		} else if (result == 1) {
+			return 1;
 		}
 	}
 	printf("Generating a standard BIP44 Bitcoin wallet...\n"
@@ -220,43 +219,33 @@ int32 new_handle(User *user) {
 		}
 	}
 	printf("Got it! %d words it is..\n", nword);
-	while (1) {
-		printf("Would you like to add an additional passphrase on top of the mnemonic seed words for extra security?\nReply 'yes' or 'no'> ");
-		zero((void *)cmd, sizeof(cmd));
-		zero((void *)passphrase, sizeof(passphrase));
-		if (!fgets(cmd, sizeof(cmd), stdin)) {
-			fprintf(stderr, "fgets() failure\n");
-			return 1;
+	result = command_loop(cmd, 256, "Would you like to add an additional passphrase on top of the mnemonic seed words for extra security?\n"
+				"Reply 'yes' or 'no'\n",
+				"yes",
+				"no",
+				"Got it. Let's add a passphrase",
+				"Got it. Passphrase is left blank.\n"
+				"You will only need to write down your seed word once it's generated.\n");
+	if (result < 0) {
+		exit_handle(user);
+	} else if (result == 0) {
+		// Add passphrase
+		zero((void *)passphrase, 256);
+		print_red("Remember that funds sent to this wallet will always need this passphrase to be recovered!");
+		printf("Think of this passphrase as the %dth word of your mnemonic seed, you MUST have it\n"
+			"Enter your passphrase (*CASE SENSITIVE*) (up to 256 characters)\n> ", nword + 1);
+		if (!fgets(passphrase, 256, stdin)) {
+			fprintf(stderr, "Error reading passphrase input\n");
+			exit_handle(user);
 		}
-		cmd[strlen(cmd) - 1] = '\0';
-		int i = 0;
-		while (cmd[i] != '\0') {
-			cmd[i] = tolower((unsigned char)cmd[i]);
-			i++;
-		}
-		if (strcmp(cmd, "exit") == 0) exit_handle(user);
-		if ((strcmp(cmd, "yes") != 0) && (strcmp(cmd, "no") != 0)) {
-			printf("\nInvalid answer, must type 'yes' or 'no'\n");
-		} else if (strcmp(cmd, "yes") == 0) {
-			printf("\nGot it! Let's add a passphrase, a few critical details here:\n"
-				RED"Remember that funds sent to this wallet will always need this passphrase to be recovered!\n"RESET
-				"Think of this passphrase as the %dth word of your mnemonic seed, you MUST have it\n"
-				"Enter your passphrase (*case sensitive*) (up to 256 characters):\n"
-				"> ", nword + 1);
-			if (!fgets(passphrase, sizeof(passphrase), stdin)) {
-				fprintf(stderr, "fgets() failure\n");
-				}
-				passphrase[strlen(passphrase) - 1] = '\0';
-				printf("\nPassphrase successfully included..");
-				break;
-		} else if (strcmp(cmd, "no") == 0) {
-			printf("\nGot it! Your passphrase is left blank\n"
-				"You will only need to write down and remember your seed words once it's generated\n");
-			passphrase[0] = '\0';
-			break;
-		}
-	}			
-	int result;
+		passphrase[strlen(passphrase) - 1] = '\0';
+		printf("Passphrase added.\n");	
+	} else {
+		// No passphrase
+		zero((void *)passphrase, 256);
+		passphrase[0] = '\0';
+	}
+	zero((void *)mnemonic, 256);	
 	result = generate_mnemonic(nword, passphrase, mnemonic, 256, user->seed);
 	if (result != 0) {
 		fprintf(stderr, "Failure generate wallet seed.\n");
@@ -267,7 +256,7 @@ int32 new_handle(User *user) {
 		GREEN"%s\n"RESET
 		"\n\n"
 		RED"IMPORTANT:"RESET 
-		" Please write these words down very carefully on a piece of paper\n"
+		"Please write those words above very carefully on a piece of paper\n"
 		"Do NOT type or save them on any electronic devices\n"
 		RED"Losing these words or having them stolen = losing all of your bitcoin\n"RESET, mnemonic);
 	if (passphrase[0]) {
@@ -278,27 +267,28 @@ int32 new_handle(User *user) {
 		RED"If you attempt to recover this wallet with only your seed words and the incorrect or blank passphrase,\n"
 		"you will see a completely different wallet, not the one you're about to use to send funds to\n"RESET, nword);
 	}	
-	if (user->master_key) {
+	if (user->has_master_key) {
 		zero((void *)user->master_key, sizeof(key_pair_t));
 		gcry_free(user->master_key);
-		user->master_key = NULL;	
+		user->master_key = NULL;
+		user->has_master_key = 0;
 	}
-	user->master_key = gcry_malloc_secure(sizeof(key_pair_t));
+	user->master_key = gcry_calloc_secure(1, sizeof(key_pair_t));
 	if (!user->master_key) {
-		fprintf(stderr, "Failed to allocate master key\n");
 		zero((void *)user->seed, SEED_LENGTH);
+		fprintf(stderr, "Failed to allocate new master key\n");
 		return 1;
 	}
-	zero((void *)user->master_key, sizeof(key_pair_t));
 	// Generate master private and public key
-	result = generate_master_key(user->seed, SEED_LENGTH, user->master_key);
-	if (result != 0) {
+	if (generate_master_key(user->seed, SEED_LENGTH, user->master_key) != 0) {
 		zero((void *)user->seed, SEED_LENGTH);
 		gcry_free(user->master_key);
 		user->master_key = NULL;
+		user->has_master_key = 0;
 		fprintf(stderr, "Failure generating master key\n");
 		return 1;
 	}
+	user->has_master_key = 1;
 	printf("Master key successfully generated.\n");
 	return 0;
 }
@@ -308,32 +298,22 @@ int32 recover_handle(User *user) {
 	char mnemonic[256];
 	char cmd[256];
 	int nword;
+	int result;
 	if (has_wallet(user)) {
-		while (1) {
-			printf("You already have a wallet set in this account\n"
-				"Would you like to recover a new one anyways and overwrite the existing one?\n> ");
-			zero((void *)cmd, sizeof(cmd));
-			if (!fgets(cmd, sizeof(cmd), stdin)) {
-				fprintf(stderr, "fgets() failure\n");
-				return 1;
-			}
-			cmd[strlen(cmd) - 1] = '\0';
-			int i = 0;
-			while (cmd[i] != '\0') {
-				cmd[i] = tolower((unsigned char)cmd[i]);
-				i++;
-			}
-			if (strcmp(cmd, "exit") == 0) exit_handle(user);
-			if ((strcmp(cmd, "yes") != 0) && (strcmp(cmd, "no") != 0)) {
-				printf("Invalid answer, must type 'yes' or 'no'.\n");
-			} else if (strcmp(cmd, "no") == 0) {
-				printf("Got it, we'll keep the existing wallet for now.\n");
-				return 1;
-			} else if (strcmp(cmd, "yes") == 0) {
-				break;
-			}
+		result = command_loop(cmd, 256, "You already have a wallet set in this current account.\n"
+					"Would you like to generate a new one anyways and overwrite?\n"
+					"Type 'yes' or 'no'\n", 
+					"yes", 
+					"no", 
+					"Okay, overwriting old wallet.", 
+					"Got it, we'll keep existing wallet.");
+		if (result < 0) {
+			exit_handle(user);
+		} else if (result == 1) {
+			return 1;
 		}
 	}
+
 	printf("Highly recommended that you turn your internet off for this part\n");
 	while (1) {
 		printf("How many words are your mnemonic seed phrase?\n"
@@ -345,7 +325,7 @@ int32 recover_handle(User *user) {
 			return 1;
 		}
 		cmd[strlen(cmd) - 1] = '\0';
-		int i = 0;
+		size_t i = 0;
 		while (cmd[i] != '\0') {
 			cmd[i] = tolower((unsigned char)cmd[i]);
 			i++;
@@ -389,72 +369,58 @@ int32 recover_handle(User *user) {
 	printf("Got it!\n");
 	printf("Do you have a passphrase to add to the mnemonic seed?\n");
 	printf("Keep in mind a completely different wallet will appear based on whether a passphrase was used or not.\n");
-	while (1) {
-		printf("Type 'yes' or 'no'\n> ");
-		zero((void *)cmd, sizeof(cmd));
-		zero((void *)passphrase, sizeof(passphrase));
-		if (!fgets(cmd, sizeof(cmd), stdin)) {
-			fprintf(stderr, "fgets() failure\n");
-			return 1;
+	
+	result = command_loop(cmd, 256, "Type 'yes' or 'no'", "yes", "no", 
+				"Got it. Let's add a passphrase.", 
+				"Got it. Passphrase will be left blank.");
+	if (result < 0) {
+		exit_handle(user);
+	} else if (result == 0) {
+		zero((void *)passphrase, 256);
+		print_red("Remember that funds sent to this wallet will always need this passphrase to be recovered!");
+		printf("Think of this passphrase as the %dth word of your mnemonic seed, you MUST have it\n"
+			"Enter your passphrase (*CASE SENSITIVE*) (up to 256 characters)\n> ", nword + 1);
+		if (!fgets(passphrase, 256, stdin)) {
+			fprintf(stderr, "Error reading passphrase input\n");
+			exit_handle(user);
 		}
-		cmd[strlen(cmd) - 1] = '\0';
-		int i = 0;
-		while (cmd[i] != '\0') {
-			cmd[i] = tolower((unsigned char)cmd[i]);
-			i++;
-		}
-		if (strcmp(cmd, "exit") == 0) exit_handle(user);
-		if ((strcmp(cmd, "yes") != 0) && (strcmp(cmd, "no") != 0)) {
-			printf("\nInvalid answer, must type 'yes' or 'no'\n");
-		} else if (strcmp(cmd, "yes") == 0) {
-			printf("\nGot it! Let's add a passphrase, a few critical details here:\n"
-				RED"Remember that funds sent to this wallet will always need this passphrase to be recovered!\n"RESET
-				"Think of this passphrase as the %dth word of your mnemonic seed, you MUST have it\n"
-				"Enter your passphrase (*case sensitive*) (up to 256 characters):\n"
-				"> ", nword + 1);
-			if (!fgets(passphrase, sizeof(passphrase), stdin)) {
-				fprintf(stderr, "fgets() failure\n");
-				return 1;
-			}
-			passphrase[strlen(passphrase) - 1] = '\0';
-			printf("\nPassphrase successfully included...\n");
-			break;
-		} else if (strcmp(cmd, "no") == 0) {
-			printf("\nGot it! Your passphrase is left blank\n");
-			passphrase[0] = '\0';
-			break;
-		}
+		passphrase[strlen(passphrase) - 1] = '\0';
+		printf("Passphrase added.\n");	
+	} else {
+		// No passphrase
+		zero((void *)passphrase, 256);
+		passphrase[0] = '\0';
 	}
 	uint8_t temp_seed[SEED_LENGTH];
-	int result = mnemonic_to_seed(mnemonic, passphrase[0] ? passphrase : "", temp_seed);
-	if (result != 0) {
+	if (mnemonic_to_seed(mnemonic, passphrase[0] ? passphrase : "", temp_seed) != 0) {
 		fprintf(stderr, "Failure converting mnemonic to seed\n");
 		return 1;
 	}
 	zero((void *)user->seed, SEED_LENGTH);
 	memcpy(user->seed, temp_seed, SEED_LENGTH);
 	zero((void *)temp_seed, SEED_LENGTH);
-	printf("Wallet successfully recovered.\n");
-	if (user->master_key) {
+	printf("Wallet recovery success.\n");
+	if (user->has_master_key) {
 		zero((void *)user->master_key, sizeof(key_pair_t));
 		gcry_free(user->master_key);
 		user->master_key = NULL;	
+		user->has_master_key = 0;
 	}
-	user->master_key = gcry_malloc_secure(sizeof(key_pair_t));
+	user->master_key = gcry_calloc_secure(1, sizeof(key_pair_t));
 	if (!user->master_key) {
 		fprintf(stderr, "Failed to allocate master key\n");
 		zero((void *)user->seed, SEED_LENGTH);
 		return 1;
 	}
-	zero((void *)user->master_key, sizeof(key_pair_t));
-	result = generate_master_key(user->seed, SEED_LENGTH, user->master_key);
-	if (result != 0) {
+	if (generate_master_key(user->seed, SEED_LENGTH, user->master_key) != 0) {
 		zero((void *)user->seed, SEED_LENGTH);
 		gcry_free(user->master_key);
 		user->master_key = NULL;
+		user->has_master_key = 0;
 		fprintf(stderr, "Failure generating master key\n");
 		return 1;
 	}
+	user->has_master_key = 1;
 	printf("Master key successfully generated.\n");
 	return 0;
 }
@@ -477,7 +443,7 @@ int32 key_handle(User *user) {
 			return 1;
 		}
 		cmd[strlen(cmd) - 1] = '\0';
-		int j = 0;
+		size_t j = 0;
 		while (cmd[j] != '\0') {
 			cmd[j] = tolower((unsigned char)cmd[j]);
 			j++;
@@ -516,7 +482,7 @@ int32 key_handle(User *user) {
 				return 1;
 			}
 			cmd[strlen(cmd) - 1] = '\0';
-			int j = 0;
+			size_t j = 0;
 			while (cmd[j] != '\0') {
 				cmd[j] = tolower((unsigned char)cmd[j]);
 				j++;
@@ -546,32 +512,29 @@ int32 key_handle(User *user) {
 				}
 			}	
 		}
-		key_pair_t *coin_key = gcry_malloc(sizeof(key_pair_t));
+		key_pair_t *coin_key = gcry_malloc_secure(sizeof(key_pair_t));
 		if (!coin_key) {
 			fprintf(stderr, "Error allocating\n");
 			return 1;
 		}
-		result = derive_from_master_to_coin(user->master_key, coin_key);
-		if (result != 0) {
+		if (derive_from_master_to_coin(user->master_key, coin_key) != 0) {
 			fprintf(stderr, "Failure deriving coin key\n");
 			zero_and_gcry_free((void *)coin_key, sizeof(key_pair_t));
 			return 1;
 		}
-		key_pair_t *account_key = gcry_malloc(sizeof(key_pair_t));
+		key_pair_t *account_key = gcry_malloc_secure(sizeof(key_pair_t));
 		if (!account_key) {
 			fprintf(stderr, "Error allocating\n");
 			zero_and_gcry_free((void *)coin_key, sizeof(key_pair_t));
 			return 1;
 		}
-		result = derive_child_key(coin_key, HARD_FLAG | account_index, account_key);
-		if (result != 0) {
+		if (derive_child_key(coin_key, HARD_FLAG | account_index, account_key) != 0) {
 			fprintf(stderr, "Failure deriving account key\n");
 			zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)coin_key, (void *)account_key, NULL);
 			return 1;
 		}
 		result = serialize_extended_key(coin_key, account_key, 0, &output);
-		zero_and_gcry_free((void *)coin_key, sizeof(key_pair_t));
-		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
+		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)coin_key, (void *)account_key, NULL);
 	}
 	if (result != 0) {
 		fprintf(stderr, "Serialization error\n");
@@ -579,6 +542,7 @@ int32 key_handle(User *user) {
 	}
 	printf("Here is your serialized Base58-encoded address, write it down and keep it safe! (do not take a picture or save it on a computer)\n\n");
 	printf(GREEN"%s\n\n"RESET, output);
+	free(output);
 	return 0;
 }
 
@@ -609,7 +573,7 @@ int32 balance_handle(User *user) {
 			return 1;
 		}
 		cmd[strlen(cmd) - 1] = '\0';
-		int j = 0;
+		size_t j = 0;
 		while (cmd[j] != '\0') {
 			cmd[j] = tolower((unsigned char)cmd[j]);
 			j++;
@@ -672,7 +636,6 @@ int32 receive_handle(User *user) {
 		"Type 'new' or 'recover' to begin\n");
 		return 1;
 	}
-	int result;
 	char cmd[256];
 	uint32_t account_index;
 	printf("What account do you want to use?\n"
@@ -695,7 +658,7 @@ int32 receive_handle(User *user) {
 			return 1;
 		}
 		cmd[strlen(cmd) - 1] = '\0';
-		int j = 0;
+		size_t j = 0;
 		while (cmd[j] != '\0') {
 			cmd[j] = tolower((unsigned char)cmd[j]);
 			j++;
@@ -712,7 +675,7 @@ int32 receive_handle(User *user) {
 		printf("Please wait while we query the blockchain to ensure previous accounts have already been used...\n");
 		// Ensure all accounts preceding it have been used
 		for (uint32_t index = 0; index < account_index; index++) {
-			result = scan_one_accounts_external_chain(user->master_key, index, &user->last_api_request);
+			int result = scan_one_accounts_external_chain(user->master_key, index, &user->last_api_request);
 			if (result < 0) {
 				fprintf(stderr, "Error scanning previous accounts\n");
 				continue;
@@ -735,29 +698,22 @@ int32 receive_handle(User *user) {
 	account_key = gcry_malloc_secure(sizeof(key_pair_t));
 	if (!account_key) {
 		fprintf(stderr, "Error gcry_malloc_secure\n");
-		gcry_free(account);
 		return 1;
 	}
-	result = derive_from_master_to_account(user->master_key, account_index, account_key); // m/84'/0'/account'
-	if (result != 0) {
+	if (derive_from_master_to_account(user->master_key, account_index, account_key) != 0) { // m/84'/0'/account'
 		fprintf(stderr, "Failed to derive account key\n");
 		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
-		gcry_free(account);
 		return 1;
 	}
-		
 	key_pair_t *change_key;
 	change_key = gcry_malloc_secure(sizeof(key_pair_t));
 	if (!change_key) {
 		fprintf(stderr, "Error gcry_malloc_secure\n");
-		gcry_free(account);
 		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
 		return 1;
 	}
-	result = derive_from_account_to_change(account_key, (uint32_t)0, change_key);
-	if (result != 0) {
+	if (derive_from_account_to_change(account_key, (uint32_t)0, change_key) != 0) {
 		fprintf(stderr, "Failed to derive change key\n");
-		gcry_free(account);
 		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
 		return 1;
 	}
@@ -765,25 +721,19 @@ int32 receive_handle(User *user) {
 	child_key = gcry_malloc_secure(sizeof(key_pair_t));
 	if (!child_key) {
 		fprintf(stderr, "Error gcry_malloc_secure\n");
-		gcry_free(account);
 		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
 		return 1;
 	}
-	result = derive_from_change_to_child(change_key, (uint32_t)account->used_indexes_count, child_key);
-	if (result != 0) {
+	if (derive_from_change_to_child(change_key, (uint32_t)account->used_indexes_count, child_key) != 0) {
 		fprintf(stderr, "Failed to derive child key\n");
-		gcry_free(account);
 		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);
 		return 1;
 	}
 	increment_account_used_index(account);
-		
 	char address[ADDRESS_MAX_LEN];
-	result = pubkey_to_address(child_key->key_pub_compressed, PUBKEY_LENGTH, address, ADDRESS_MAX_LEN);
-	if (result != 0) {
-		gcry_free(account);
-		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);	
+	if (pubkey_to_address(child_key->key_pub_compressed, PUBKEY_LENGTH, address, ADDRESS_MAX_LEN) != 0) {
 		fprintf(stderr, "Failed to generate receive address.\n");
+		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);	
 		return 1;
 	}
 	// Clean up intermediate keys
@@ -814,7 +764,6 @@ int32 send_handle(User *user) {
 
 	char cmd[256];
 	uint32_t account_index;
-	int result;
 	while(1) {
 		printf("Please enter the account number you'd like to send from (between 0 - 100)\n"
 			"We will query the blockchain to make sure you have enough UTXOs balance in this account to send funds.\n"
@@ -825,7 +774,7 @@ int32 send_handle(User *user) {
 			return 1;
 		}
 		cmd[strlen(cmd) - 1] = '\0';
-		int j = 0;
+		size_t j = 0;
 		while (cmd[j] != '\0') {
 			cmd[j] = tolower((unsigned char)cmd[j]);
 			j++;
@@ -856,29 +805,50 @@ int32 send_handle(User *user) {
 
 	if (total_balance == 0) {
 		printf("No sats to send.\n");
-		for (int i = 0; i < num_utxos; i++) {
-			gcry_free((void *)utxos[i]->key);
-			gcry_free((void *)utxos[i]);
-		}
-		gcry_free((void *)utxos);
+		free_utxos_array(utxos, &num_utxos, (size_t)num_utxos);
 		return 0;
 	}
 
 	char recipient[ADDRESS_MAX_LEN];
 	long long amount;
-	printf("Enter recipient address, be sure to verify thoroughly.\n> ");
+	printf("Enter recipient address, be sure to verify thoroughly:\n"
+		"(we do not check and verify recipient address as of this version, please be sure to enter it correctly)\n> ");
 	zero((void *)recipient, ADDRESS_MAX_LEN);
 	if (!fgets(recipient, ADDRESS_MAX_LEN, stdin)) {
 		fprintf(stderr, "Error reading command\n");
-		for (int i = 0; i < num_utxos; i++) {
-			gcry_free((void *)utxos[i]->key);
-			gcry_free((void *)utxos[i]);
-		}
-		gcry_free((void *)utxos);
+		free_utxos_array(utxos, &num_utxos, (size_t)num_utxos);
 		return 1;
 	}
-	printf("Got it!\nYou entered: %s", recipient);
 	recipient[strlen(recipient) - 1] = '\0';
+	printf("Got it!\nYou entered: %s\n", recipient);
+	while (1) {
+		printf("Is this address correct?\n");
+		printf(GREEN"%s\n"RESET, recipient);
+		printf("Type 'yes' or 'no' > ");
+		zero((void *)cmd, 256);
+		if (!fgets(cmd, 256, stdin)) {
+			fprintf(stderr, "Error reading command\n");
+			free_utxos_array(utxos, &num_utxos, (size_t)num_utxos);
+			return 1;
+		}
+		cmd[strlen(cmd) - 1] = '\0';
+		size_t i = 0;
+		while (cmd[i] != '\0') {
+			cmd[i] = tolower((unsigned char)cmd[i]);
+			i++;
+		}
+		if (strcmp(cmd, "exit") == 0) exit_handle(user);
+		if ((strcmp(cmd, "yes") != 0) && (strcmp(cmd, "no") != 0)) {
+			printf("\nInvalid answer, must type 'yes' or 'no'\n");
+		} else if (strcmp(cmd, "yes") == 0) {
+			printf("Address confirmed.\n");
+			break;
+		} else if (strcmp(cmd, "no") == 0) {
+			printf("Try again.\n");
+			free_utxos_array(utxos, &num_utxos, (size_t)num_utxos);
+			return 1;
+		}			
+	}
 	while (1) {
 		zero((void *)cmd, 256);
 		printf("Enter amount you wish to send in satoshis (Your balance: %lld):\n"
@@ -902,11 +872,7 @@ int32 send_handle(User *user) {
 	
 	if (get_fee_rate(&regular_rate, &priority_rate, &user->last_api_request) != 0) {
 		fprintf(stderr, "Fee rate fetch failed.\n");
-		for (int i = 0; i < num_utxos; i++) {
-			gcry_free((void *)utxos[i]->key);
-			gcry_free((void *)utxos[i]);
-		}
-		gcry_free((void *)utxos);
+		free_utxos_array(utxos, &num_utxos, (size_t)num_utxos);
 		return 1;
 	}
 	printf("Here are the current market fee rates (in satoshis):\n"
@@ -954,7 +920,7 @@ int32 send_handle(User *user) {
 			continue;
 		}
 		cmd[strlen(cmd) - 1] = '\0';
-		int i = 0;
+		size_t i = 0;
 		while (cmd[i] != '\0') {
 			cmd[i] = tolower((unsigned char)cmd[i]);
 			i++;
@@ -976,20 +942,13 @@ int32 send_handle(User *user) {
 	long long input_sum = 0;
 	printf("The program will now select the best UTXOs for this transaction, using a 'greedy' method,\n"
 		"meaning that we will try to use the smallest number of UTXOs set possible, to save on fees.\n");
-	result = select_coins(utxos, num_utxos, amount, fee, &selected, &num_selected, &input_sum);
-	if (result != 0) {
+	if (select_coins(utxos, num_utxos, amount, fee, &selected, &num_selected, &input_sum) != 0 || num_selected == 0) {
 		printf("Coin selection failed\n");
-		if (num_selected > 0) {
-			for (int i = 0; i < num_selected; i++) {
-				gcry_free((void *)selected[i]->key);
-				gcry_free((void *)selected[i]);
-			}
-		}
 		return 1;
 	}
 	printf("Selected %d UTXOs, total: %lld satoshis\n", num_selected, input_sum);
-	for (int i = 0; i < num_selected; i++) {
-		printf("UTXO index=%d: txid=%s, vout=%u, amount=%lld\n", 
+	for (size_t i = 0; i < num_selected; i++) {
+		printf("UTXO index=%ld: txid=%s, vout=%u, amount=%lld\n", 
 			i, selected[i]->txid, selected[i]->vout, selected[i]->amount);
 	}
 	
@@ -999,72 +958,39 @@ int32 send_handle(User *user) {
 	account_t *account = add_account_to_user(user, account_index);
 	if (!account || !change_back_key) {
 		fprintf(stderr, "Failure adding account or allocating change_back_key\n");
-		if (num_selected > 0) {
-			for (int i = 0; i < num_selected; i++) {
-				gcry_free((void *)selected[i]->key);
-				gcry_free((void *)selected[i]);
-			}
-		}
+		free_utxos_array(selected, &num_selected, (size_t)num_selected);
 		return 1;
 	}
 	if (change > 0) {
 		uint32_t change_index = account->used_indexes_count;
-		result = derive_from_master_to_account(user->master_key, account_index, change_back_key); 
-		if (result != 0) {
+		if (derive_from_master_to_account(user->master_key, account_index, change_back_key) != 0) { 
 			fprintf(stderr, "Account key derivation failed\n");
-			if (num_selected > 0) {
-				for (int i = 0; i < num_selected; i++) {
-					gcry_free((void *)selected[i]->key);
-					gcry_free((void *)selected[i]);
-				}
-			}
-			gcry_free((void *)account);	
+			free_utxos_array(selected, &num_selected, (size_t)num_selected);
 			gcry_free((void *)change_back_key);
 			return 1;
 		}
-		result = derive_from_account_to_change(change_back_key, (uint32_t)1, change_back_key);
-		if (result != 0) {
+		if (derive_from_account_to_change(change_back_key, (uint32_t)1, change_back_key) != 0) {
 			fprintf(stderr, "Change key derivation failed\n");
-			if (num_selected > 0) {
-				for (int i = 0; i < num_selected; i++) {
-					gcry_free((void *)selected[i]->key);
-					gcry_free((void *)selected[i]);
-				}
-			}
-			gcry_free((void *)account);	
+			free_utxos_array(selected, &num_selected, (size_t)num_selected);
 			gcry_free((void *)change_back_key);
 			return 1;
 		}
-		result = derive_from_change_to_child(change_back_key, change_index, change_back_key);
-		if (result != 0) {
+		if (derive_from_change_to_child(change_back_key, change_index, change_back_key) != 0) {
 			fprintf(stderr, "Child key derivation failed\n");
-			if (num_selected > 0) {
-				for (int i = 0; i < num_selected; i++) {
-					gcry_free((void *)selected[i]->key);
-					gcry_free((void *)selected[i]);
-				}
-			}
-			gcry_free((void *)account);	
+			free_utxos_array(selected, &num_selected, (size_t)num_selected);
 			gcry_free((void *)change_back_key);
 			return 1;
 		}
 		account->used_indexes_count++;
 	}	
-	gcry_free((void *)account);	
 	gcry_free((void *)change_back_key);
 
 	char *raw_tx_hex = NULL;
 	uint8_t *segwit_tx = NULL;
 	size_t segwit_len = 0;
-	result = build_transaction(recipient, amount, selected, num_selected, change_back_key, fee, &raw_tx_hex, &segwit_tx, &segwit_len, rbf);
-	if (result != 0) {
+	if (build_transaction(recipient, amount, selected, num_selected, change_back_key, fee, &raw_tx_hex, &segwit_tx, &segwit_len, rbf) != 0) {
 		fprintf(stderr, "Failure building transaction\n");
-		if (num_selected > 0) {
-			for (int i = 0; i < num_selected; i++) {
-				gcry_free((void *)selected[i]->key);
-				gcry_free((void *)selected[i]);
-			}
-		}
+		free_utxos_array(selected, &num_selected, (size_t)num_selected);
 		return 1;
 	}
 	printf("Successfully built transaction data\n");
@@ -1075,28 +1001,16 @@ int32 send_handle(User *user) {
 	reverse_bytes(txid, 32);
 	free(segwit_tx);
 	// Sign
-	result = sign_transaction(&raw_tx_hex, selected, num_selected);
-	if (result != 0) {
+	if (sign_transaction(&raw_tx_hex, selected, num_selected) != 0) {
 		fprintf(stderr, "Failure signing transaction\n");
-		if (num_selected > 0) {
-			for (int i = 0; i < num_selected; i++) {
-				gcry_free((void *)selected[i]->key);
-				gcry_free((void *)selected[i]);
-			}
-		}
+		free_utxos_array(selected, &num_selected, (size_t)num_selected);
 		free(raw_tx_hex);
 		return 1;
 	}
-	if (num_selected > 0) {
-		for (int i = 0; i < num_selected; i++) {
-			gcry_free((void *)selected[i]->key);
-			gcry_free((void *)selected[i]);
-		}
-	}
+	free_utxos_array(selected, &num_selected, (size_t)num_selected);
 
 	printf("Successfully signed transaction data\n");
-	result = broadcast_transaction(raw_tx_hex, &user->last_api_request);	
-	if (result != 0) {
+	if (broadcast_transaction(raw_tx_hex, &user->last_api_request) != 0) {
 		fprintf(stderr, "Failure broadcasting transaction\n");
 		free(raw_tx_hex);
 		return 1;
@@ -1144,7 +1058,7 @@ int32 rbf_handle(User *user) {
 	printf("Please provide the transaction ID of the unconfirmed RBF-enabled tx in the mempool you'd like to replace.\n");
 	char tx_id[256];
 	while (1) {
-		printf("TxID > ");
+		printf("TXID > ");
 		zero((void *)tx_id, 256);
 		if (!fgets(tx_id, 256, stdin)) {
 			fprintf(stderr, "Error reading command\n");
@@ -1159,25 +1073,16 @@ int32 rbf_handle(User *user) {
 			break;
 		}
 	}
-	rbf_data_t *rbf_data = malloc(sizeof(rbf_data_t));
+	rbf_data_t *rbf_data = gcry_calloc_secure(1, sizeof(rbf_data_t));
+	if (!rbf_data) {
+		fprintf(stderr, "Error allocating rbf_data\n");
+		return 1;
+	}
 	if (query_rbf_transaction(tx_id, &rbf_data, &user->last_api_request) != 0) {
 		fprintf(stderr, "Unable to fetch transaction\n");
+		zero_and_gcry_free((void *)rbf_data, sizeof(rbf_data_t));
 		return 1;	
 	}
-
-for (int i = 0; i < rbf_data->num_inputs; i++) {
-printf("UTXO Txid: %s\n", rbf_data->utxos[i]->txid);
-printf("UTXO Vout: %d\n", (int)rbf_data->utxos[i]->vout);
-printf("UTXO Address: %s\n", rbf_data->utxos[i]->address);
-printf("UTXO amount: %lld\n", rbf_data->utxos[i]->amount);
-}
-printf("Num Outputs: %d\n", rbf_data->num_outputs);
-for (int i = 0; i < rbf_data->num_outputs; i++) {
-printf("Output address: %s\n", rbf_data->outputs[i]->address);
-printf("Output Value: %lld\n", rbf_data->outputs[i]->amount);
-}
-printf("Total Fee: %lld sats\n", rbf_data->old_fee);
-
 
 	// Uncomment this later, only blocking it for testing
 /*
@@ -1187,13 +1092,19 @@ printf("Total Fee: %lld sats\n", rbf_data->old_fee);
 	}
 */
 	printf("Found unconfirmed transaction.\n");
-	if (fetch_raw_tx_hex(tx_id, rbf_data, &user->last_api_request) != 0) {
+	if (fetch_rbf_raw_tx_hex(tx_id, rbf_data, &user->last_api_request) != 0) {
 		fprintf(stderr, "Unable to fetch raw transaction hex data\n");
+		free_utxos_array(rbf_data->utxos, &(rbf_data->num_inputs), (size_t)rbf_data->num_inputs);
+		free_rbf_outputs_array(rbf_data->outputs, (size_t)rbf_data->num_outputs);
+		zero_and_gcry_free((void *)rbf_data, sizeof(rbf_data_t));
 		return 1;
 	}
 
 	if (check_rbf_sequence(rbf_data->raw_tx_hex, rbf_data->num_inputs) != 0) {
 		fprintf(stderr, "This transaction does not have RBF enabled on any of its inputs. Try a different transaction.\n");
+		free_utxos_array(rbf_data->utxos, &(rbf_data->num_inputs), (size_t)rbf_data->num_inputs);
+		free_rbf_outputs_array(rbf_data->outputs, (size_t)rbf_data->num_outputs);
+		zero_and_gcry_free((void *)rbf_data, sizeof(rbf_data_t));
 		return 1;
 	}
 	printf("Transaction has RBF enabled, proceeding...\n");
@@ -1204,7 +1115,8 @@ printf("Total Fee: %lld sats\n", rbf_data->old_fee);
 		printf("Please enter account index (0 - 100) (must match account used to build original transaction)\n> ");
 		zero((void *)cmd, 256);
 		if (!fgets(cmd, 256, stdin)) {
-			fprintf(stderr, "Failure reading account number\n");
+			fprintf(stderr, "Failure reading account number\n");		
+			free_complete_rbf(rbf_data);
 			return 1;
 		}
 		cmd[strlen(cmd) - 1] = '\0';
@@ -1225,15 +1137,18 @@ printf("Total Fee: %lld sats\n", rbf_data->old_fee);
 	account_t *account = add_account_to_user(user, rbf_data->account_index);
 	if (!account) {
 		fprintf(stderr, "Failure adding account\n");
+		free_complete_rbf(rbf_data);
 		return 1;
 	}
 	if (match_utxos_to_keys(user->master_key, rbf_data) != 0) {
 		fprintf(stderr, "Failure matching UTXOs to private keys.\n");
+		free_complete_rbf(rbf_data);
 		return 1;
 	}	
 	
 	if (calculate_rbf_fee(rbf_data, 2, &user->last_api_request) != 0) {
 		fprintf(stderr, "Failure calculating RBF fee\n");
+		free_complete_rbf(rbf_data);
 		return 1;
 	}
 	while (1) {
@@ -1241,6 +1156,7 @@ printf("Total Fee: %lld sats\n", rbf_data->old_fee);
 		zero((void *)cmd, 256);
 		if (!fgets(cmd, 256, stdin)) {
 			fprintf(stderr, "Error reading command\n");
+			free_complete_rbf(rbf_data);
 			return 1;
 		}
 		cmd[strlen(cmd) - 1] = '\0';
@@ -1255,12 +1171,14 @@ printf("Total Fee: %lld sats\n", rbf_data->old_fee);
 			break;
 		} else if (strcmp(cmd, "no") == 0) {
 			printf("Okay, cancelling RBF transaction.\n");
+			free_complete_rbf(rbf_data);
 			return 1;
 		} else {
 			fprintf(stderr, "Invalid response, 'yes', 'no', or 'exit' only\n");
 			continue;
 		}
 	}
+	int result;	
 	if (rbf_data->num_outputs > 1) {
 		printf("Your previous transaction had %d total recipients. Please confirm that you only had %d intended\n"
 			"recipient address(es), and that the last one is your change address.\n"
@@ -1268,84 +1186,55 @@ printf("Total Fee: %lld sats\n", rbf_data->old_fee);
 			"in order to pay the difference in miner's fee.\n"
 			"(Explanation: If a transaction's input(s) exceeds the output(s), there is always an automatic 'change address'\n"
 			"generated to send the remaining sats back to you.\n", (int)rbf_data->num_outputs, (int)rbf_data->num_outputs - 1);
-		while (1) {
-			printf("Confirm with 'yes' or 'no'> ");
-			zero((void *)cmd, 256);
-			if (!fgets(cmd, 256, stdin)) {
-				fprintf(stderr, "Error reading command\n");
-				return 1;
-			}
-			cmd[strlen(cmd) - 1] = '\0';
-			int i = 0;
-			while (cmd[i] != '\0') {
-				cmd[i] = tolower((unsigned char)cmd[i]);
-				i++;
-			}
-			if (strcmp(cmd, "exit") == 0) exit_handle(user);
-			if (strcmp(cmd, "yes") == 0) {
-				printf("Got it, we will modify the existing change output (the last recipient address) to accomodate the new fee.\n");
-				break;
-			} else if (strcmp(cmd, "no") == 0) {
-				printf("Unfortunately, that means your input UTXO(s) will not have enough sats to cover the additional fee.\n"
-					"Your old transaction will remain in the mempool for around 2 weeks, and if it's not picked up\n"
-					"by a miner to be mined into a block, it will simply 'fall off' of no consequence to you.\n"
-					"In the meantime, you can make a new transaction, but not with those same UTXOs that are currently\n"
-					"'stuck' in the mempool.\n\n");
-				printf("Another valid option is to simply decrease the amount sent to the last recipient address of your original\n"
-					"transaction. The difference in fee will be subtracted from that output in order to pay the miners.\n"
-					"If you want this option, restart the 'rbf' command again and say 'yes' to decreasing the last recipient's\n"
-					"output amount to pay the miner's fee.\n");
-				return 1; 	
-				
-			} else {
-				fprintf(stderr, "Invalid response, 'yes', 'no', or 'exit' only\n");
-				continue;
-			}
+		result = command_loop(cmd, 256, "Confirm with 'yes' or 'no' >",
+					"yes", "no",
+					"Got it, we will modify the existing change output (the last recipient address) to accomodate the new fee.",
+					"Unfortunately, that means your input UTXO(s) will not have enough sats to cover the additional fee."
+                                        "Your old transaction will remain in the mempool for around 2 weeks, and if it's not picked up"
+                                        "by a miner to be mined into a block, it will simply 'fall off' of no consequence to you."
+                                        "In the meantime, you can make a new transaction, but not with those same UTXOs that are currently"
+                                        "'stuck' in the mempool."
+                                	"Another valid option is to simply decrease the amount sent to the last recipient address of your original"
+                                        "transaction. The difference in fee will be subtracted from that output in order to pay the miners."
+                                        "If you want this option, restart the 'rbf' command again and say 'yes' to decreasing the last recipient's"
+                                        "output amount to pay the miner's fee.");
+		if (result < 0) {
+			free_complete_rbf(rbf_data);
+			exit_handle(user);
+		} else if (result > 0) {
+			free_complete_rbf(rbf_data);
+			return 1;
 		}
 	} else {
 		printf("It seems you only have 1 output in the original transaction. You can still make a new RBF replacement transaction\n"
 			"if you decrease the output amount for this recipient in order to pay the difference in fees.\n"
 			"Would you still like to proceed? >");
-		while (1) {
-			printf("Type 'yes' or 'no'> ");
-			zero((void *)cmd, 256);
-			if (!fgets(cmd, 256, stdin)) {
-				fprintf(stderr, "Error reading command\n");
-				return 1;
-			}
-			cmd[strlen(cmd) - 1] = '\0';
-			int i = 0;
-			while (cmd[i] != '\0') {
-				cmd[i] = tolower((unsigned char)cmd[i]);
-				i++;
-			}
-			if (strcmp(cmd, "exit") == 0) exit_handle(user);
-			if (strcmp(cmd, "yes") == 0) {
-				printf("Got it, we will modify the existing change output (the last recipient address) to accomodate the new fee.\n");
-				break;
-			} else if (strcmp(cmd, "no") == 0) {
-				printf("Unfortunately, that means your input UTXO(s) will not have enough sats to cover the additional fee.\n"
-					"Your old transaction will remain in the mempool for around 2 weeks, and if it's not picked up\n"
-					"by a miner to be mined into a block, it will simply 'fall off' of no consequence to you.\n"
-					"In the meantime, you can make a new transaction, but not with those same UTXOs that are currently\n"
-					"'stuck' in the mempool.\n\n");
-				printf("Another valid option is to simply decrease the amount sent to the last recipient address of your original\n"
-					"transaction. The difference in fee will be subtracted from that output in order to pay the miners.\n"
-					"If you want this option, restart the 'rbf' command again and say 'yes' to decreasing the last recipient's\n"
-					"output amount to pay the miner's fee.\n");
-				return 1; 	
-			} else {
-				fprintf(stderr, "Invalid response, 'yes', 'no', or 'exit' only\n");
-				continue;
-			}
+		result = command_loop(cmd, 256, "Type 'yes' or 'no'", 
+					"yes", "no",
+					"Got it, we will modify the existing change output (the last recipient address) to accomodate the new fee.",
+					"Unfortunately, that means your input UTXO(s) will not have enough sats to cover the additional fee."
+                                        "Your old transaction will remain in the mempool for around 2 weeks, and if it's not picked up"
+                                        "by a miner to be mined into a block, it will simply 'fall off' of no consequence to you."
+                                        "In the meantime, you can make a new transaction, but not with those same UTXOs that are currently"
+                                        "'stuck' in the mempool."
+                                	"Another valid option is to simply decrease the amount sent to the last recipient address of your original"
+                                        "transaction. The difference in fee will be subtracted from that output in order to pay the miners."
+                                        "If you want this option, restart the 'rbf' command again and say 'yes' to decreasing the last recipient's"
+                                        "output amount to pay the miner's fee.");
+		if (result < 0) {
+			free_complete_rbf(rbf_data);
+			exit_handle(user);
+		} else if (result > 0) {
+			free_complete_rbf(rbf_data);
+			return 1;
 		}
-	
 	}	
 	char *raw_tx_hex = NULL;
 	uint8_t *segwit_tx = NULL;
 	size_t segwit_len = 0;
 	if (build_rbf_transaction(rbf_data, &raw_tx_hex, &segwit_tx, &segwit_len) != 0) {
 		fprintf(stderr, "Failure building RBF transaction.\n");
+		free_complete_rbf(rbf_data);
 		return 1;
 	}
 	printf("Successfully built new RBF transaction data.\n");
@@ -1357,28 +1246,32 @@ printf("Total Fee: %lld sats\n", rbf_data->old_fee);
 	// Sign
 	if (sign_transaction(&raw_tx_hex, rbf_data->utxos, rbf_data->num_inputs) != 0) {
 		fprintf(stderr, "Failure signing RBF transaction.\n");
+		free_complete_rbf(rbf_data);
 		free(raw_tx_hex);
 		return 1;
 	}
 	printf("Successfully signed transaction data\n");
 	if (broadcast_transaction(raw_tx_hex, &user->last_api_request) != 0) {
 		fprintf(stderr, "Failure broadcasting transaction\n");
+		free_complete_rbf(rbf_data);
 		free(raw_tx_hex);
 		return 1;
 	}
 	printf("Broadcast successful.\n");
 	printf("This is your transaction ID, (in reverse byte order as per conventional blockchain explorers' standards) track it on the blockchain:\n");
 	print_bytes_as_hex("TXID", txid, 32);
+	free_complete_rbf(rbf_data);
 	free(raw_tx_hex);
 	return 0;
 }
 
 int32 help_handle(User *user) {
+	printf("Coming soon... :)\n");
 	return 0;
 }
 
 int32 menu_handle(User *user) {
-	print_commands();
+	print_menu();
 	return 0;
 }
 
@@ -1419,16 +1312,20 @@ void main_loop(User *user) {
 }
 
 int main() {
-	User *user;
-	user = (User *)gcry_malloc(sizeof(User));
-	print_logo();
 	init_gcrypt();
-	int result = init_user(user);
-	if (result != 0) {
-		fprintf(stderr, "User secured allocation and setup failed.\n");
+	User *user;
+	user = (User *)gcry_malloc_secure(sizeof(User));
+	if (!user) {
+		fprintf(stderr, "Failure to allocate user\n");
 		return 1;
 	}
-	print_commands();
+	print_logo();
+	if (init_user(user) != 0) {
+		fprintf(stderr, "User secured allocation and setup failed.\n");
+		gcry_free(user);
+		return 1;
+	}
+	print_menu();
 	main_loop(user);
 	free_user(user);
 	return 0;

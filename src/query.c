@@ -5,6 +5,7 @@
 #include "wallet.h"
 #include "crypt.h"
 #include "hash.h"
+#include "memory.h"
 
 // Matching the parameters prototype of how curl expects their callback function
 size_t curl_write_callback_func(void *contents, size_t size, size_t nmemb, void *userdata) {
@@ -32,7 +33,7 @@ int set_curl_run_curl(CURL *curl, char *url, curl_buffer_t *buffer, time_t *last
 	time_t now = time(NULL);
 	if (*last_request != 0 && difftime(now, *last_request) < SECS_PER_REQUEST) {
 		int sleep_time = SECS_PER_REQUEST - (int)difftime(now, *last_request);
-		printf("Rate limit: 1 request per 20 seconds...\nWaiting %d seconds...\n", sleep_time);
+		printf("Rate limit: 1 request per %d seconds...\nWaiting %d seconds...\n", SECS_PER_REQUEST, sleep_time);
 		sleep(sleep_time);
 	}
 	// Perform network transfer
@@ -125,14 +126,12 @@ int estimate_transaction_size(int num_inputs, int num_outputs) {
 int get_fee_rate(long long *regular_rate, long long *priority_rate, time_t *last_request) {
 	printf("Fetching miners fee rate...\n");
 	CURL *curl = NULL;
-	int result = init_curl(&curl);
-	if (result != 0) return 1;
+	if (init_curl(&curl) != 0) return 1;
 
 	char url[] = "https://mempool.space/api/v1/fees/recommended";
 	curl_buffer_t buffer = {0};
 	
-	result = set_curl_run_curl(curl, url, &buffer, last_request);
-	if (result != 0) return 1;
+	if (set_curl_run_curl(curl, url, &buffer, last_request) != 0) return 1;
 	
 	json_error_t error;
 	json_t *root = json_loads(buffer.data, 0, &error);
@@ -159,26 +158,26 @@ int get_fee_rate(long long *regular_rate, long long *priority_rate, time_t *last
 	return 0;
 }
 
-int fetch_raw_tx_hex(char *tx_id, rbf_data_t *rbf_data, time_t *last_request) {
+int fetch_rbf_raw_tx_hex(char *tx_id, rbf_data_t *rbf_data, time_t *last_request) {
 	if (!tx_id || !rbf_data) {
 		fprintf(stderr, "Invalid inputs\n");
 		return 1;
 	}
 	CURL *curl = NULL;
-	int result = init_curl(&curl);
-	if (result != 0) {
+	if (init_curl(&curl) != 0) {
 		fprintf(stderr, "Curl init failure\n");
 		return 1;
 	}
 	char url[2048];
 	snprintf(url, sizeof(url), "https://mempool.space/api/tx/%s/hex", tx_id);
 	curl_buffer_t buffer = {0};
-	result = set_curl_run_curl(curl, url, &buffer, last_request);
-	if (result != 0) return 1;
+	if (set_curl_run_curl(curl, url, &buffer, last_request) != 0) {
+		return 1;
+	}
 	
 	if (buffer.size < 10 || !buffer.data) {
 		fprintf(stderr, "Invalid raw transaction hex\n");
-		free(buffer.data);
+		if (buffer.data) free(buffer.data);
 		return 1;
 	}	
 	rbf_data->raw_tx_hex = buffer.data; // Transfer ownership
@@ -228,7 +227,7 @@ int query_rbf_transaction(char *tx_id, rbf_data_t **rbf_data, time_t *last_reque
 		json_decref(root);
 		return 1;
 	}
-	(*rbf_data)->utxos = malloc((*rbf_data)->num_inputs * sizeof(utxo_t *));	
+	(*rbf_data)->utxos = gcry_calloc_secure((*rbf_data)->num_inputs, sizeof(utxo_t *));	
 	if (!(*rbf_data)->utxos) {
 		fprintf(stderr, "Failure allocating utxos\n");
 		json_decref(root);
@@ -237,11 +236,10 @@ int query_rbf_transaction(char *tx_id, rbf_data_t **rbf_data, time_t *last_reque
 	size_t vin_index;
 	json_t *vin_item;
 	json_array_foreach(vin_array, vin_index, vin_item) {
-		utxo_t *utxo = malloc(sizeof(utxo_t));
+		utxo_t *utxo = gcry_malloc_secure(sizeof(utxo_t));
 		if (!utxo) {
 			fprintf(stderr, "Failure allocating utxo\n");
-			for (int i = 0; i < vin_index; i++) free((*rbf_data)->utxos[i]);
-			free((*rbf_data)->utxos);
+			free_utxos_array((*rbf_data)->utxos, &(*rbf_data)->num_inputs, vin_index);
 			json_decref(root);
 			return 1;
 		}
@@ -261,15 +259,13 @@ int query_rbf_transaction(char *tx_id, rbf_data_t **rbf_data, time_t *last_reque
 				utxo->amount = (long long)json_integer_value(value);
 			} else {
 				fprintf(stderr, "Missing or invalid prevout in vin item %zu\n", vin_index);
-				for (int i = 0; i < vin_index; i++) free((*rbf_data)->utxos[i]);
-				free((*rbf_data)->utxos);
+				free_utxos_array((*rbf_data)->utxos, &(*rbf_data)->num_inputs, vin_index);
 				json_decref(root);
 				return 1;
 			}
 		} else {
 			fprintf(stderr, "Unable to read input UTXOs\n");
-			for (int i = 0; i < vin_index; i++) free((*rbf_data)->utxos[i]);
-			free((*rbf_data)->utxos);
+			free_utxos_array((*rbf_data)->utxos, &(*rbf_data)->num_inputs, vin_index);
 			json_decref(root);
 			return 1;
 		}
@@ -279,15 +275,15 @@ int query_rbf_transaction(char *tx_id, rbf_data_t **rbf_data, time_t *last_reque
 	json_t *vout_array = json_object_get(root, "vout");
 	if (json_is_array(vout_array)) {
 		(*rbf_data)->num_outputs = json_array_size(vout_array);
-
 	} else {
 		fprintf(stderr, "Unable to read num of outputs\n");
+		free_utxos_array((*rbf_data)->utxos, &(*rbf_data)->num_inputs, (size_t)(*rbf_data)->num_inputs);
 		json_decref(root);
 		return 1;
 	}
 	size_t vout_index;
 	json_t *vout_item;
-	(*rbf_data)->outputs = malloc((*rbf_data)->num_outputs * sizeof(rbf_output_t *));
+	(*rbf_data)->outputs = gcry_calloc_secure((*rbf_data)->num_outputs, sizeof(rbf_output_t *));
 	json_array_foreach(vout_array, vout_index, vout_item) {
 		rbf_output_t *output = malloc(sizeof(rbf_output_t));
 		json_t *s = json_object_get(vout_item, "scriptpubkey");
@@ -297,10 +293,8 @@ int query_rbf_transaction(char *tx_id, rbf_data_t **rbf_data, time_t *last_reque
 			output->address[strlen(json_string_value(addr))] = '\0';
 		} else {
 			fprintf(stderr, "Unable to read output address\n");
-			for (int i = 0; i < (*rbf_data)->num_inputs; i++) free((*rbf_data)->utxos[i]);
-			free((*rbf_data)->utxos);
-			for (int j = 0; j < vout_index; j++) free((*rbf_data)->outputs[j]);
-			free((*rbf_data)->outputs);
+			free_utxos_array((*rbf_data)->utxos, &(*rbf_data)->num_inputs, (size_t)(*rbf_data)->num_inputs);
+			free_rbf_outputs_array((*rbf_data)->outputs, (size_t)vout_index);
 			json_decref(root);
 			return 1;
 		}
@@ -309,10 +303,8 @@ int query_rbf_transaction(char *tx_id, rbf_data_t **rbf_data, time_t *last_reque
 			output->amount = json_integer_value(value);
 		} else {
 			fprintf(stderr, "Unable to read output value\n");
-			for (int i = 0; i < (*rbf_data)->num_inputs; i++) free((*rbf_data)->utxos[i]);
-			free((*rbf_data)->utxos);
-			for (int j = 0; j < vout_index; j++) free((*rbf_data)->outputs[j]);
-			free((*rbf_data)->outputs);
+			free_utxos_array((*rbf_data)->utxos, &(*rbf_data)->num_inputs, (size_t)(*rbf_data)->num_inputs);
+			free_rbf_outputs_array((*rbf_data)->outputs, (size_t)vout_index);
 			json_decref(root);
 			return 1;
 		}
@@ -324,10 +316,8 @@ int query_rbf_transaction(char *tx_id, rbf_data_t **rbf_data, time_t *last_reque
 		(*rbf_data)->old_fee = json_integer_value(fee);
 	} else {
 		fprintf(stderr, "Unable to read fee\n");
-		for (int i = 0; i < (*rbf_data)->num_inputs; i++) free((*rbf_data)->utxos[i]);
-		free((*rbf_data)->utxos);
-		for (int j = 0; j < vout_index; j++) free((*rbf_data)->outputs[j]);
-		free((*rbf_data)->outputs);
+		free_utxos_array((*rbf_data)->utxos, &(*rbf_data)->num_inputs, (size_t)(*rbf_data)->num_inputs);
+		free_rbf_outputs_array((*rbf_data)->outputs, (*rbf_data)->num_outputs);
 		json_decref(root);
 		return 1;
 	}
@@ -417,29 +407,24 @@ long long get_account_balance(key_pair_t *master_key, uint32_t account_index, ti
 		// Allocate each of the 40 addresses and NULL it
 		char *address = (char *)malloc(sizeof(char) * ADDRESS_MAX_LEN);
 		if (!address) {
-			for (int j = 0; j < i; j++) free(addresses[j]);
-			free(addresses);
+			free_addresses(addresses, i);
 			fprintf(stderr, "Error allocating address\n");
 			return 1;
 		}
-		address[0] = '\0';
+		zero((void *)address, ADDRESS_MAX_LEN);
 		addresses[i] = address;
 	}
 	int addr_count = 0;
-	int result;
 	key_pair_t *account_key = NULL;
 	account_key = gcry_malloc_secure(sizeof(key_pair_t));
 	if (!account_key) {
 		fprintf(stderr, "Error gcry_malloc_secure\n");
-		for (int j = 0; j < GAP_LIMIT * 2; j++) free(addresses[j]);
-		free(addresses);
+		free_addresses(addresses, (size_t)GAP_LIMIT * 2);
 		return 1;
 	}
-	result = derive_from_master_to_account(master_key, account_index, account_key); 
-	if (result != 0) {
+	if (derive_from_master_to_account(master_key, account_index, account_key) != 0) {
 		fprintf(stderr, "Failure deriving account key\n");
-		for (int j = 0; j < GAP_LIMIT * 2; j++) free(addresses[j]);
-		free(addresses);
+		free_addresses(addresses, (size_t)GAP_LIMIT * 2);
 		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
 		return 1;
 	}
@@ -449,16 +434,13 @@ long long get_account_balance(key_pair_t *master_key, uint32_t account_index, ti
 		change_key = gcry_malloc_secure(sizeof(key_pair_t));
 		if (!change_key) {
 			fprintf(stderr, "Error gcry_malloc_secure\n");
-			for (int j = 0; j < GAP_LIMIT * 2; j++) free(addresses[j]);
-			free(addresses);
+			free_addresses(addresses, (size_t)GAP_LIMIT * 2);
 			zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
 			return 1;
 		}
-		result = derive_from_account_to_change(account_key, change, change_key); // m'/84'/0'/account'/change	
-		if (result != 0) {
+		if (derive_from_account_to_change(account_key, change, change_key) != 0) { // m'/84'/0'/account'/change	
 			fprintf(stderr, "Failure deriving child key\n");
-			for (int j = 0; j < GAP_LIMIT * 2; j++) free(addresses[j]);
-			free(addresses);
+			free_addresses(addresses, (size_t)GAP_LIMIT * 2);
 			zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
 			return 1;
 		}
@@ -468,24 +450,19 @@ long long get_account_balance(key_pair_t *master_key, uint32_t account_index, ti
 			child_key = gcry_malloc_secure(sizeof(key_pair_t));
 			if (!child_key) {
 				fprintf(stderr, "Error gcry_malloc_secure\n");
-				for (int j = 0; j < GAP_LIMIT * 2; j++) free(addresses[j]);
-				free(addresses);
+				free_addresses(addresses, (size_t)GAP_LIMIT * 2);
 				zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
 				return 1;
 			}
-			result = derive_from_change_to_child(change_key, child_index, child_key); // m/84'/0'/account'/change/index
-			if (result != 0) {
+			if (derive_from_change_to_child(change_key, child_index, child_key) != 0) { // m/84'/0'/account'/change/index
 				fprintf(stderr, "Failed to derive child key\n");
-				for (int j = 0; j < GAP_LIMIT * 2; j++) free(addresses[j]);
-				free(addresses);
+				free_addresses(addresses, (size_t)GAP_LIMIT * 2);
 				zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);
 				return 1;
 			}
-			result = pubkey_to_address(child_key->key_pub_compressed, PUBKEY_LENGTH, addresses[addr_count], ADDRESS_MAX_LEN);
-			if (result != 0) {
+			if (pubkey_to_address(child_key->key_pub_compressed, PUBKEY_LENGTH, addresses[addr_count], ADDRESS_MAX_LEN) != 0) {
 				fprintf(stderr, "Failed to generate address\n");
-				for (int j = 0; j < GAP_LIMIT * 2; j++) free(addresses[j]);
-				free(addresses);
+				free_addresses(addresses, (size_t)GAP_LIMIT * 2);
 				zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);
 				return 1;
 			}
@@ -496,8 +473,7 @@ long long get_account_balance(key_pair_t *master_key, uint32_t account_index, ti
 	}
 	zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
     	long long balance = get_balance((const char **)addresses, addr_count, last_request);
-	for (int j = 0; j < GAP_LIMIT * 2; j++) free(addresses[j]);		
-	free(addresses);
+	free_addresses(addresses, (size_t)GAP_LIMIT * 2);
 	return balance;		
 }
 
@@ -509,13 +485,12 @@ int scan_one_accounts_external_chain(key_pair_t *master_key, uint32_t account_in
 		fprintf(stderr, "Failed to allocate addresses array\n");
 		return -1;
 	}
-	for (int i = 0; i < GAP_LIMIT; i++) {
+	for (size_t i = 0; i < GAP_LIMIT; i++) {
 		// Allocate each of the 40 addresses and NULL it
 		char *address = (char *)malloc(sizeof(char) * ADDRESS_MAX_LEN);
 		if (address == NULL) {
-			for (int j = 0; j < i; j++) free(addresses[j]);
-			free(addresses);
 			fprintf(stderr, "Error allocating address\n");
+			free_addresses(addresses, i);
 			return 1;
 		}
 		address[0] = '\0';
@@ -526,63 +501,50 @@ int scan_one_accounts_external_chain(key_pair_t *master_key, uint32_t account_in
 	child_key = gcry_malloc_secure(sizeof(key_pair_t));
 	if (!child_key) {
 		fprintf(stderr, "Failure allocating child key\n");
-		for (int j = 0; j < GAP_LIMIT; j++) free(addresses[j]);
-		free(addresses);
+		free_addresses(addresses, (size_t)GAP_LIMIT);
 		return 1;
 	}
-	int result = derive_from_master_to_account(master_key, account_index, child_key);
-	if (result != 0) {
+	if (derive_from_master_to_account(master_key, account_index, child_key) != 0) {
 		fprintf(stderr, "Error deriving child key\n");
-		for (int j = 0; j < GAP_LIMIT; j++) free(addresses[j]);
-		free(addresses);
+		free_addresses(addresses, (size_t)GAP_LIMIT);
 		zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
 		return 1;
 	}
-	result = derive_from_account_to_change(child_key, (uint32_t)0, child_key);
-	if (result != 0) {
+	if (derive_from_account_to_change(child_key, (uint32_t)0, child_key) != 0) {
 		fprintf(stderr, "Error deriving child key\n");
-		for (int j = 0; j < GAP_LIMIT; j++) free(addresses[j]);
-		free(addresses);
+		free_addresses(addresses, (size_t)GAP_LIMIT);
 		zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
 		return 1;
 	}
 	for (uint32_t index = 0; index < (uint32_t)GAP_LIMIT; index++) {
-		result = derive_from_change_to_child(child_key, index, child_key);
-		if (result != 0) {
+		if (derive_from_change_to_child(child_key, index, child_key) != 0) {
 			fprintf(stderr, "Error deriving child key\n");
-			for (int j = 0; j < GAP_LIMIT; j++) free(addresses[j]);
-			free(addresses);
+			free_addresses(addresses, (size_t)GAP_LIMIT);
 			zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
 			return 1;
 		}
-		result = pubkey_to_address(child_key->key_pub_compressed, PUBKEY_LENGTH, addresses[addr_count], ADDRESS_MAX_LEN);
-		if (result != 0) {
+		if (pubkey_to_address(child_key->key_pub_compressed, PUBKEY_LENGTH, addresses[addr_count], ADDRESS_MAX_LEN) != 0) {
 			fprintf(stderr, "Failed to generate address\n");
-			for (int j = 0; j < GAP_LIMIT; j++) free(addresses[j]);
-			free(addresses);
+			free_addresses(addresses, (size_t)GAP_LIMIT);
 			zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
 			return 1;
 		}
 		addr_count++;	
 	}
 	curl_buffer_t buffer = {0};
-	result = init_curl_and_addresses((const char **)addresses, addr_count, &buffer, last_request);
-	if (result != 0) {
+	if (init_curl_and_addresses((const char **)addresses, addr_count, &buffer, last_request) != 0) {
 		fprintf(stderr, "Failed to initialize curl and addresses\n");
-		for (int j = 0; j < GAP_LIMIT; j++) free(addresses[j]);
-		free(addresses);
+		free_addresses(addresses, (size_t)GAP_LIMIT);
 		zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
 		return 1;
 	}
 	if (parse_json_for_any_transaction(buffer.data) > 0 ) {
 		printf("Account %d have previous transactions on the blockchain.\n", (int)account_index);
-		for (int j = 0; j < GAP_LIMIT; j++) free(addresses[j]);
-		free(addresses);
+		free_addresses(addresses, (size_t)GAP_LIMIT);
 		zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
 		return 1;	
 	}
-	for (int j = 0; j < GAP_LIMIT; j++) free(addresses[j]);
-	free(addresses);
+	free_addresses(addresses, (size_t)GAP_LIMIT);
 	zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
 	printf("Account %d have no recorded transactions on the blockchain, we recommend using this account instead.\n", (int)account_index);
 	return 0;
