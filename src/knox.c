@@ -47,10 +47,10 @@ int init_user(User *user) {
 	user->accounts_capacity = ACCOUNTS_CAPACITY;
 	user->last_api_request = 0;
 	user->last_price_cached = 0.0;
-//	double price = get_bitcoin_price(&user->last_api_request);
-//	if (price > 0.0) {
-//		user->last_price_cached = price;
-//	}
+	double price = get_bitcoin_price(&user->last_api_request);
+	if (price > 0.0) {
+		user->last_price_cached = price;
+	}
 	user->last_api_request = time(NULL);
 	return 0;
 }

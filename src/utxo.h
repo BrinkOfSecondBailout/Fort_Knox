@@ -8,7 +8,7 @@
 
 #define TX_VERSION 2 // Segwit
 #define SIGHASH_ALL 0x01
-
+#define MAX_RAW_TX_HEX 1000
 typedef struct {
 	char txid[65]; // 64 hex + null
 	uint32_t vout; // Output index of input in the transaction

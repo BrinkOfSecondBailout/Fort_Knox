@@ -47,7 +47,7 @@ void remove_from_mempool(void *object, size_t size) {
 				previous->next = curr->next;
 			}
 			zero_and_gcry_free(object, size);
-			gcry_free(curr->object);
+			//gcry_free(curr->object);
 			mempool->total_bytes -= size;
 			mempool->total_bytes -= sizeof(object_t *);
 			return;
@@ -76,20 +76,19 @@ void add_to_mempool(void *object, size_t size) {
 		mempool->head = gcry_malloc_secure(sizeof(object_t *));
 		mempool->head->object = object;
 	}
+	mempool->total_bytes += size;
 	mempool->total_bytes += sizeof(object_t *);
 	return;
 }
 
 void *g_malloc(size_t size) {
 	void *result = gcry_malloc_secure(size);
-	mempool->total_bytes += size;
 	add_to_mempool(result, size);
 	return result;
 }
 
 void *g_calloc(size_t size) {
 	void *result = gcry_calloc_secure(1, size);
-	mempool->total_bytes += size;
 	add_to_mempool(result, size);
 	return result;
 }
@@ -142,7 +141,7 @@ void free_utxos_array(utxo_t **utxos, int *num_utxos, size_t j) {
 }
 
 void free_complete_rbf(rbf_data_t *rbf_data) {
-	g_free((void *)rbf_data->raw_tx_hex, sizeof(rbf_data->raw_tx_hex));
+	g_free(rbf_data->raw_tx_hex, MAX_RAW_TX_HEX);
 	free_utxos_array(rbf_data->utxos, &(rbf_data->num_inputs), (size_t)rbf_data->num_inputs);
 	free_rbf_outputs_array(rbf_data->outputs, (size_t)rbf_data->num_outputs);
 	g_free((void *)rbf_data, sizeof(rbf_data_t *));

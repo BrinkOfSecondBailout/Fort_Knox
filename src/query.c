@@ -174,12 +174,14 @@ int fetch_rbf_raw_tx_hex(char *tx_id, rbf_data_t *rbf_data, time_t *last_request
 		return 1;
 	}
 	
-	if (buffer.size < 10 || !buffer.data) {
+	if (buffer.size < 10 || buffer.size >= 1000 || !buffer.data) {
 		fprintf(stderr, "Invalid raw transaction hex\n");
 		if (buffer.data) free(buffer.data);
 		return 1;
 	}	
-	rbf_data->raw_tx_hex = buffer.data; // Transfer ownership
+	strncpy(rbf_data->raw_tx_hex, buffer.data, buffer.size);
+	rbf_data->raw_tx_hex[buffer.size] = '\0';
+	free(buffer.data);
 printf("Raw TX: %s\n", rbf_data->raw_tx_hex);
 	return 0;
 }
@@ -320,6 +322,7 @@ int query_rbf_transaction(char *tx_id, rbf_data_t **rbf_data, time_t *last_reque
 		json_decref(root);
 		return 1;
 	}
+	(*rbf_data)->raw_tx_hex = (char *)g_malloc(MAX_RAW_TX_HEX);
 	printf("Successfully queried RBF transaction data.\n");
 	json_decref(root);
 	return 0;
