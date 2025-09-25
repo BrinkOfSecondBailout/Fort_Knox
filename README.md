@@ -1,9 +1,9 @@
-# Forty-Fort Knox Bitcoin Wallet
+# Fort Knox Bitcoin Wallet
 
 ![Thumbnail image](img/FortKnox.png)
 
 ## Overview
-**Forty-Fort Knox** is a lightweight, command-line Bitcoin wallet implemented in C, designed for secure and straightforward Bitcoin transaction management. It leverages **BIP-32**, **BIP-39** and **BIP-44** for hierarchical deterministic (HD) wallet generation, supports **P2WPKH (SegWit)** **BIP-141** **BIP-173** transactions, and integrates with public APIs for real-time blockchain data. The wallet prioritizes security using Libgcrypt for cryptographic operations and simplicity for educational purposes.
+**Fort Knox** is a lightweight, command-line Bitcoin wallet implemented in C, designed for secure and straightforward Bitcoin transaction management. It leverages **BIP-32**, **BIP-39** and **BIP-44** for hierarchical deterministic (HD) wallet generation, supports **P2WPKH (SegWit)** **BIP-141** **BIP-173** transactions, and integrates with public APIs for real-time blockchain data. The wallet prioritizes security using Libgcrypt for cryptographic operations and simplicity for educational purposes.
 
 This project is under active development, currently supporting basic mainnet operations with plans for testnet support and advanced features like Replace-By-Fee (RBF), UTXO consolidations...etc
 
