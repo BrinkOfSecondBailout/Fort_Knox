@@ -3,7 +3,6 @@
 #include <curl/curl.h>
 #include "query.h"
 #include "wallet.h"
-#include "crypt.h"
 #include "hash.h"
 #include "memory.h"
 
@@ -227,7 +226,7 @@ int query_rbf_transaction(char *tx_id, rbf_data_t **rbf_data, time_t *last_reque
 		json_decref(root);
 		return 1;
 	}
-	(*rbf_data)->utxos = gcry_calloc_secure((*rbf_data)->num_inputs, sizeof(utxo_t *));	
+	(*rbf_data)->utxos = (utxo_t **)g_calloc((*rbf_data)->num_inputs * sizeof(utxo_t *));	
 	if (!(*rbf_data)->utxos) {
 		fprintf(stderr, "Failure allocating utxos\n");
 		json_decref(root);
@@ -236,7 +235,7 @@ int query_rbf_transaction(char *tx_id, rbf_data_t **rbf_data, time_t *last_reque
 	size_t vin_index;
 	json_t *vin_item;
 	json_array_foreach(vin_array, vin_index, vin_item) {
-		utxo_t *utxo = gcry_malloc_secure(sizeof(utxo_t));
+		utxo_t *utxo = (utxo_t *)g_malloc(sizeof(utxo_t));
 		if (!utxo) {
 			fprintf(stderr, "Failure allocating utxo\n");
 			free_utxos_array((*rbf_data)->utxos, &(*rbf_data)->num_inputs, vin_index);
@@ -283,9 +282,9 @@ int query_rbf_transaction(char *tx_id, rbf_data_t **rbf_data, time_t *last_reque
 	}
 	size_t vout_index;
 	json_t *vout_item;
-	(*rbf_data)->outputs = gcry_calloc_secure((*rbf_data)->num_outputs, sizeof(rbf_output_t *));
+	(*rbf_data)->outputs = (rbf_output_t **)g_calloc((*rbf_data)->num_outputs * sizeof(rbf_output_t *));
 	json_array_foreach(vout_array, vout_index, vout_item) {
-		rbf_output_t *output = malloc(sizeof(rbf_output_t));
+		rbf_output_t *output = (rbf_output_t *)g_malloc(sizeof(rbf_output_t));
 		json_t *s = json_object_get(vout_item, "scriptpubkey");
 		json_t *addr = json_object_get(vout_item, "scriptpubkey_address");
 		if (json_is_string(s) && json_is_string(addr)) {
@@ -398,16 +397,17 @@ long long get_account_balance(key_pair_t *master_key, uint32_t account_index, ti
 		return 1;
 	}
 	char **addresses = NULL;
-	addresses = malloc(GAP_LIMIT * 2 * sizeof(char *));
+	size_t num_allocated = GAP_LIMIT * 2;
+	addresses = (char **)g_malloc(num_allocated * sizeof(char *));
 	if (!addresses) {
 		fprintf(stderr, "Failed to allocate addresses array\n");
 		return 1;
 	}
-	for (size_t i = 0; i < GAP_LIMIT * 2; i++) {
+	for (size_t i = 0; i < num_allocated; i++) {
 		// Allocate each of the 40 addresses and NULL it
-		char *address = (char *)malloc(sizeof(char) * ADDRESS_MAX_LEN);
+		char *address = (char *)g_malloc(sizeof(char) * ADDRESS_MAX_LEN);
 		if (!address) {
-			free_addresses(addresses, i);
+			free_addresses(addresses, i, num_allocated);
 			fprintf(stderr, "Error allocating address\n");
 			return 1;
 		}
@@ -416,81 +416,81 @@ long long get_account_balance(key_pair_t *master_key, uint32_t account_index, ti
 	}
 	int addr_count = 0;
 	key_pair_t *account_key = NULL;
-	account_key = gcry_malloc_secure(sizeof(key_pair_t));
+	account_key = (key_pair_t *)g_malloc(sizeof(key_pair_t));
 	if (!account_key) {
 		fprintf(stderr, "Error gcry_malloc_secure\n");
-		free_addresses(addresses, (size_t)GAP_LIMIT * 2);
+		free_addresses(addresses, num_allocated, num_allocated);
 		return 1;
 	}
 	if (derive_from_master_to_account(master_key, account_index, account_key) != 0) {
 		fprintf(stderr, "Failure deriving account key\n");
-		free_addresses(addresses, (size_t)GAP_LIMIT * 2);
-		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
+		free_addresses(addresses, num_allocated, num_allocated);
+		g_free((void *)account_key, sizeof(key_pair_t));
 		return 1;
 	}
 	for (uint32_t change = 0; change < 2; change++) { // 0 for external, 1 for internal
 		// Generate the change (chain)
 		key_pair_t *change_key = NULL;
-		change_key = gcry_malloc_secure(sizeof(key_pair_t));
+		change_key = (key_pair_t *)g_malloc(sizeof(key_pair_t));
 		if (!change_key) {
 			fprintf(stderr, "Error gcry_malloc_secure\n");
-			free_addresses(addresses, (size_t)GAP_LIMIT * 2);
-			zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
+			free_addresses(addresses, num_allocated, num_allocated);
+			g_free((void *)account_key, sizeof(key_pair_t));
 			return 1;
 		}
 		if (derive_from_account_to_change(account_key, change, change_key) != 0) { // m'/84'/0'/account'/change	
 			fprintf(stderr, "Failure deriving child key\n");
-			free_addresses(addresses, (size_t)GAP_LIMIT * 2);
-			zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
+			free_addresses(addresses, num_allocated, num_allocated);
+			g_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
 			return 1;
 		}
 		// For each change (chain), go through all the indexes
 		for (uint32_t child_index = 0; child_index < (uint32_t)GAP_LIMIT; child_index++) {
 			key_pair_t *child_key = NULL;
-			child_key = gcry_malloc_secure(sizeof(key_pair_t));
+			child_key = (key_pair_t *)g_malloc(sizeof(key_pair_t));
 			if (!child_key) {
 				fprintf(stderr, "Error gcry_malloc_secure\n");
-				free_addresses(addresses, (size_t)GAP_LIMIT * 2);
-				zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
+				free_addresses(addresses, num_allocated, num_allocated);
+				g_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
 				return 1;
 			}
 			if (derive_from_change_to_child(change_key, child_index, child_key) != 0) { // m/84'/0'/account'/change/index
 				fprintf(stderr, "Failed to derive child key\n");
-				free_addresses(addresses, (size_t)GAP_LIMIT * 2);
-				zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);
+				free_addresses(addresses, num_allocated, num_allocated);
+				g_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);
 				return 1;
 			}
 			if (pubkey_to_address(child_key->key_pub_compressed, PUBKEY_LENGTH, addresses[addr_count], ADDRESS_MAX_LEN) != 0) {
 				fprintf(stderr, "Failed to generate address\n");
-				free_addresses(addresses, (size_t)GAP_LIMIT * 2);
-				zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);
+				free_addresses(addresses, num_allocated, num_allocated);
+				g_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);
 				return 1;
 			}
 			addr_count++;
-			zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
+			g_free((void *)child_key, sizeof(key_pair_t));
 		}
-		zero_and_gcry_free((void *)change_key, sizeof(key_pair_t));
+		g_free((void *)change_key, sizeof(key_pair_t));
 	}
-	zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
+	g_free((void *)account_key, sizeof(key_pair_t));
     	long long balance = get_balance((const char **)addresses, addr_count, last_request);
-	free_addresses(addresses, (size_t)GAP_LIMIT * 2);
+	free_addresses(addresses, num_allocated, num_allocated);
 	return balance;		
 }
 
 int scan_one_accounts_external_chain(key_pair_t *master_key, uint32_t account_index, time_t *last_request) {
 	char **addresses = NULL;
 	int addr_count = 0;
-	addresses = malloc(GAP_LIMIT * sizeof(char *));
+	addresses = (char **)g_malloc(GAP_LIMIT * sizeof(char *));
 	if (!addresses) {
 		fprintf(stderr, "Failed to allocate addresses array\n");
 		return -1;
 	}
 	for (size_t i = 0; i < GAP_LIMIT; i++) {
 		// Allocate each of the 40 addresses and NULL it
-		char *address = (char *)malloc(sizeof(char) * ADDRESS_MAX_LEN);
+		char *address = (char *)g_malloc(sizeof(char) * ADDRESS_MAX_LEN);
 		if (address == NULL) {
 			fprintf(stderr, "Error allocating address\n");
-			free_addresses(addresses, i);
+			free_addresses(addresses, i, (size_t)GAP_LIMIT);
 			return 1;
 		}
 		address[0] = '\0';
@@ -498,35 +498,35 @@ int scan_one_accounts_external_chain(key_pair_t *master_key, uint32_t account_in
 	}
 
 	key_pair_t *child_key = NULL;
-	child_key = gcry_malloc_secure(sizeof(key_pair_t));
+	child_key = (key_pair_t *)g_malloc(sizeof(key_pair_t));
 	if (!child_key) {
 		fprintf(stderr, "Failure allocating child key\n");
-		free_addresses(addresses, (size_t)GAP_LIMIT);
+		free_addresses(addresses, (size_t)GAP_LIMIT, (size_t)GAP_LIMIT);
 		return 1;
 	}
 	if (derive_from_master_to_account(master_key, account_index, child_key) != 0) {
 		fprintf(stderr, "Error deriving child key\n");
-		free_addresses(addresses, (size_t)GAP_LIMIT);
-		zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
+		free_addresses(addresses, (size_t)GAP_LIMIT, (size_t)GAP_LIMIT);
+		g_free((void *)child_key, sizeof(key_pair_t));
 		return 1;
 	}
 	if (derive_from_account_to_change(child_key, (uint32_t)0, child_key) != 0) {
 		fprintf(stderr, "Error deriving child key\n");
-		free_addresses(addresses, (size_t)GAP_LIMIT);
-		zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
+		free_addresses(addresses, (size_t)GAP_LIMIT, (size_t)GAP_LIMIT);
+		g_free((void *)child_key, sizeof(key_pair_t));
 		return 1;
 	}
 	for (uint32_t index = 0; index < (uint32_t)GAP_LIMIT; index++) {
 		if (derive_from_change_to_child(child_key, index, child_key) != 0) {
 			fprintf(stderr, "Error deriving child key\n");
-			free_addresses(addresses, (size_t)GAP_LIMIT);
-			zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
+			free_addresses(addresses, (size_t)GAP_LIMIT, (size_t)GAP_LIMIT);
+			g_free((void *)child_key, sizeof(key_pair_t));
 			return 1;
 		}
 		if (pubkey_to_address(child_key->key_pub_compressed, PUBKEY_LENGTH, addresses[addr_count], ADDRESS_MAX_LEN) != 0) {
 			fprintf(stderr, "Failed to generate address\n");
-			free_addresses(addresses, (size_t)GAP_LIMIT);
-			zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
+			free_addresses(addresses, (size_t)GAP_LIMIT, (size_t)GAP_LIMIT);
+			g_free((void *)child_key, sizeof(key_pair_t));
 			return 1;
 		}
 		addr_count++;	
@@ -534,18 +534,18 @@ int scan_one_accounts_external_chain(key_pair_t *master_key, uint32_t account_in
 	curl_buffer_t buffer = {0};
 	if (init_curl_and_addresses((const char **)addresses, addr_count, &buffer, last_request) != 0) {
 		fprintf(stderr, "Failed to initialize curl and addresses\n");
-		free_addresses(addresses, (size_t)GAP_LIMIT);
-		zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
+		free_addresses(addresses, (size_t)GAP_LIMIT, (size_t)GAP_LIMIT);
+		g_free((void *)child_key, sizeof(key_pair_t));
 		return 1;
 	}
 	if (parse_json_for_any_transaction(buffer.data) > 0 ) {
 		printf("Account %d have previous transactions on the blockchain.\n", (int)account_index);
-		free_addresses(addresses, (size_t)GAP_LIMIT);
-		zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
+		free_addresses(addresses, (size_t)GAP_LIMIT, (size_t)GAP_LIMIT);
+		g_free((void *)child_key, sizeof(key_pair_t));
 		return 1;	
 	}
-	free_addresses(addresses, (size_t)GAP_LIMIT);
-	zero_and_gcry_free((void *)child_key, sizeof(key_pair_t));
+	free_addresses(addresses, (size_t)GAP_LIMIT, (size_t)GAP_LIMIT);
+	g_free((void *)child_key, sizeof(key_pair_t));
 	printf("Account %d have no recorded transactions on the blockchain, we recommend using this account instead.\n", (int)account_index);
 	return 0;
 }

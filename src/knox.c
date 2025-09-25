@@ -3,7 +3,6 @@
 #include "knox.h"
 #include "common.h"
 #include "wallet.h"
-#include "crypt.h"
 #include "mnemonic.h"
 #include "utxo.h"
 #include "hash.h"
@@ -38,19 +37,20 @@ int init_user(User *user) {
 	if (!user) return 1;
 	zero((void *)user, sizeof(User));
 	user->has_master_key = 0;
-	user->accounts = calloc(ACCOUNTS_CAPACITY, sizeof(account_t *));
+	user->accounts = (account_t **)g_calloc(ACCOUNTS_CAPACITY * sizeof(account_t *));
 	if (!user->accounts) {
-		gcry_free(user->master_key);
-		return 1;
+		fprintf(stderr, "Failure allocating accounts\n");
+		g_free((void *)user->master_key, sizeof(key_pair_t));
+		exit_handle(user);
 	}
 	user->accounts_count = 0;
 	user->accounts_capacity = ACCOUNTS_CAPACITY;
 	user->last_api_request = 0;
 	user->last_price_cached = 0.0;
-	double price = get_bitcoin_price(&user->last_api_request);
-	if (price > 0.0) {
-		user->last_price_cached = price;
-	}
+//	double price = get_bitcoin_price(&user->last_api_request);
+//	if (price > 0.0) {
+//		user->last_price_cached = price;
+//	}
 	user->last_api_request = time(NULL);
 	return 0;
 }
@@ -59,22 +59,21 @@ void free_user(User *user) {
 	if (!user) return;
 	printf("Cleaning up secured memory...\n");
 	if (user->has_master_key) {
-		zero((void *)user->master_key, sizeof(key_pair_t));
-		gcry_free(user->master_key);
+		g_free((void *)user->master_key, sizeof(key_pair_t));
 		user->master_key = NULL;
 		printf("User master key cleared...\n");
 	}
 	if (user->accounts_count > 0) {
 		for (size_t i = 0; i < user->accounts_count; i++) {
 			if (user->accounts[i]) {
-				free(user->accounts[i]);
+				g_free((void *)user->accounts[i], sizeof(account_t));
 				user->accounts[i] = NULL;
 			}
 		}
 	}
 	printf("User accounts cleared...\n");
 	if (user->accounts) {
-		free(user->accounts);
+		g_free(user->accounts, ACCOUNTS_CAPACITY * sizeof(account_t **));
 		user->accounts = NULL;
 	}
 	zero((void *)user->seed, SEED_LENGTH);
@@ -82,7 +81,7 @@ void free_user(User *user) {
 	user->accounts_capacity = 0;
 	user->last_api_request = 0;
 	user->last_price_cached = 0.0;
-	gcry_free(user);
+	g_free((void *)user, sizeof(User));
 	printf("User data successfully cleared and free.\n");
 	return;
 }
@@ -109,10 +108,9 @@ account_t *add_account_to_user(User *user, uint32_t account_index) {
 		return NULL;
 	}
 	// Create new account
-	account_t *new_account = malloc(sizeof(account_t));
+	account_t *new_account = g_malloc(sizeof(account_t));
 	if (!new_account) {
-		fprintf(stderr, "Error allocating new account\n");
-		return NULL;
+		exit_handle(user);
 	}
 	zero((void *)new_account, sizeof(account_t));
 	new_account->account_index = account_index;
@@ -158,6 +156,7 @@ Command_Handler c_handlers[] = {
 int32 exit_handle(User *user) {
 	printf("Bye now, bitcoiner!\n");
 	free_user(user);
+	free_all();
 	exit(0);
 }
 
@@ -249,7 +248,7 @@ int32 new_handle(User *user) {
 	result = generate_mnemonic(nword, passphrase, mnemonic, 256, user->seed);
 	if (result != 0) {
 		fprintf(stderr, "Failure generate wallet seed.\n");
-		return 1;
+		exit_handle(user);
 	}
 	printf("Here is your new bitcoin wallet's mnemonic seed words:\n"
 		"\n\n"
@@ -268,25 +267,22 @@ int32 new_handle(User *user) {
 		"you will see a completely different wallet, not the one you're about to use to send funds to\n"RESET, nword);
 	}	
 	if (user->has_master_key) {
-		zero((void *)user->master_key, sizeof(key_pair_t));
-		gcry_free(user->master_key);
+		g_free(user->master_key, sizeof(key_pair_t));
 		user->master_key = NULL;
 		user->has_master_key = 0;
 	}
-	user->master_key = gcry_calloc_secure(1, sizeof(key_pair_t));
+	user->master_key = (key_pair_t *)g_calloc(sizeof(key_pair_t));
 	if (!user->master_key) {
 		zero((void *)user->seed, SEED_LENGTH);
 		fprintf(stderr, "Failed to allocate new master key\n");
-		return 1;
+		exit_handle(user);
 	}
 	// Generate master private and public key
 	if (generate_master_key(user->seed, SEED_LENGTH, user->master_key) != 0) {
-		zero((void *)user->seed, SEED_LENGTH);
-		gcry_free(user->master_key);
-		user->master_key = NULL;
-		user->has_master_key = 0;
 		fprintf(stderr, "Failure generating master key\n");
-		return 1;
+		zero((void *)user->seed, SEED_LENGTH);
+		g_free((void*)user->master_key, sizeof(key_pair_t));
+		exit_handle(user);
 	}
 	user->has_master_key = 1;
 	printf("Master key successfully generated.\n");
@@ -345,7 +341,7 @@ int32 recover_handle(User *user) {
 		zero((void *)mnemonic, sizeof(mnemonic));
 		if (!fgets(mnemonic, sizeof(mnemonic), stdin)) {
 			fprintf(stderr, "fgets() failure\n");
-			return 1;
+			exit_handle(user);
 		}
 		mnemonic[strlen(mnemonic) - 1] = '\0';
 		size_t mnemonic_len = strlen(mnemonic);
@@ -393,31 +389,28 @@ int32 recover_handle(User *user) {
 	uint8_t temp_seed[SEED_LENGTH];
 	if (mnemonic_to_seed(mnemonic, passphrase[0] ? passphrase : "", temp_seed) != 0) {
 		fprintf(stderr, "Failure converting mnemonic to seed\n");
-		return 1;
+		exit_handle(user);
 	}
 	zero((void *)user->seed, SEED_LENGTH);
 	memcpy(user->seed, temp_seed, SEED_LENGTH);
 	zero((void *)temp_seed, SEED_LENGTH);
 	printf("Wallet recovery success.\n");
 	if (user->has_master_key) {
-		zero((void *)user->master_key, sizeof(key_pair_t));
-		gcry_free(user->master_key);
+		g_free((void *)user->master_key, sizeof(key_pair_t));
 		user->master_key = NULL;	
 		user->has_master_key = 0;
 	}
-	user->master_key = gcry_calloc_secure(1, sizeof(key_pair_t));
+	user->master_key = (key_pair_t *)g_calloc(sizeof(key_pair_t));
 	if (!user->master_key) {
 		fprintf(stderr, "Failed to allocate master key\n");
 		zero((void *)user->seed, SEED_LENGTH);
-		return 1;
+		exit_handle(user);
 	}
 	if (generate_master_key(user->seed, SEED_LENGTH, user->master_key) != 0) {
-		zero((void *)user->seed, SEED_LENGTH);
-		gcry_free(user->master_key);
-		user->master_key = NULL;
-		user->has_master_key = 0;
 		fprintf(stderr, "Failure generating master key\n");
-		return 1;
+		zero((void *)user->seed, SEED_LENGTH);
+		g_free((void *)user->master_key, sizeof(key_pair_t));
+		exit_handle(user);
 	}
 	user->has_master_key = 1;
 	printf("Master key successfully generated.\n");
@@ -511,29 +504,29 @@ int32 key_handle(User *user) {
 				}
 			}	
 		}
-		key_pair_t *coin_key = gcry_malloc_secure(sizeof(key_pair_t));
+		key_pair_t *coin_key = (key_pair_t *)g_malloc(sizeof(key_pair_t));
 		if (!coin_key) {
 			fprintf(stderr, "Error allocating\n");
-			return 1;
+			exit_handle(user);
 		}
 		if (derive_from_master_to_coin(user->master_key, coin_key) != 0) {
 			fprintf(stderr, "Failure deriving coin key\n");
-			zero_and_gcry_free((void *)coin_key, sizeof(key_pair_t));
-			return 1;
+			g_free((void *)coin_key, sizeof(key_pair_t));
+			exit_handle(user);
 		}
-		key_pair_t *account_key = gcry_malloc_secure(sizeof(key_pair_t));
+		key_pair_t *account_key = g_malloc(sizeof(key_pair_t));
 		if (!account_key) {
 			fprintf(stderr, "Error allocating\n");
-			zero_and_gcry_free((void *)coin_key, sizeof(key_pair_t));
-			return 1;
+			g_free((void *)coin_key, sizeof(key_pair_t));
+			exit_handle(user);
 		}
 		if (derive_child_key(coin_key, HARD_FLAG | account_index, account_key) != 0) {
 			fprintf(stderr, "Failure deriving account key\n");
-			zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)coin_key, (void *)account_key, NULL);
-			return 1;
+			g_free_multiple(sizeof(key_pair_t), (void *)coin_key, (void *)account_key, NULL);
+			exit_handle(user);
 		}
 		result = serialize_extended_key(coin_key, account_key, 0, &output);
-		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)coin_key, (void *)account_key, NULL);
+		g_free_multiple(sizeof(key_pair_t), (void *)coin_key, (void *)account_key, NULL);
 	}
 	if (result != 0) {
 		fprintf(stderr, "Serialization error\n");
@@ -541,7 +534,7 @@ int32 key_handle(User *user) {
 	}
 	printf("Here is your serialized Base58-encoded address, write it down and keep it safe! (do not take a picture or save it on a computer)\n\n");
 	printf(GREEN"%s\n\n"RESET, output);
-	free(output);
+	g_free((void *)output, strlen(output));
 	return 0;
 }
 
@@ -751,7 +744,7 @@ int32 send_handle(User *user) {
 	account_t *account = add_account_to_user(user, account_index);
 	if (!account) {
 		fprintf(stderr, "Failure allocating account\n");
-		return 1;
+		exit_handle(user);
 	}
 	printf("Please wait while we query the blockchain to check your UTXOs balance...\n(Account: %d, first 20 address indexes)\n", (int)account_index);
 	utxo_t **utxos = NULL;
@@ -857,7 +850,7 @@ int32 send_handle(User *user) {
 	printf("Do you want to mark this transaction as RBF-enabled?\n\n"
 		"(Replace-By-Fee: by having this enabled, you can later 'replace' the transaction in the mempool by doubling\n"
 		"the fee-rate of the original transaction, essentially 'speeding up' how fast it ends up in the next block\n"
-		"by incentivizing miners with a higher fee.)\nType 'yes' or 'no'> "); 
+		"by incentivizing miners with a higher fee.)\n"); 
 	result = command_loop(cmd, 256, "Type 'yes' or 'no'", "yes", "no", "RBF will be enabled.", "RBF not enabled.");
 	if (result < 0) {
 		exit_handle(user);
@@ -881,7 +874,7 @@ int32 send_handle(User *user) {
 	long long change = input_sum - amount - fee;
 	key_pair_t *change_back_key = NULL;
 	if (change > 0) {
-		change_back_key = gcry_malloc_secure(sizeof(key_pair_t));
+		change_back_key = g_malloc(sizeof(key_pair_t));
 		if (!change_back_key) {
 			fprintf(stderr, "Failure allocating change_back_key\n");
 			free_utxos_array(selected, &num_selected, (size_t)num_selected);
@@ -889,7 +882,7 @@ int32 send_handle(User *user) {
 		}
 		uint32_t child_index = account->used_indexes_count;
 		if (derive_from_master_to_child(user->master_key, account_index, (uint32_t)1, child_index, change_back_key) != 0) {
-			gcry_free((void *)change_back_key);	
+			g_free((void *)change_back_key, sizeof(key_pair_t));	
 			free_utxos_array(selected, &num_selected, (size_t)num_selected);
 			return 1;
 		}
@@ -902,34 +895,34 @@ int32 send_handle(User *user) {
 	if (build_transaction(recipient, amount, selected, num_selected, change_back_key, fee, &raw_tx_hex, &segwit_tx, &segwit_len, rbf) != 0) {
 		fprintf(stderr, "Failure building transaction\n");
 		free_utxos_array(selected, &num_selected, (size_t)num_selected);
-		if (change_back_key) gcry_free((void *)change_back_key);	
+		if (change_back_key) g_free((void *)change_back_key, sizeof(key_pair_t));	
 		return 1;
 	}
-	if (change_back_key) gcry_free((void *)change_back_key);	
+	if (change_back_key) g_free((void *)change_back_key, sizeof(key_pair_t));	
 	printf("Successfully built transaction data\n");
 	
 	// Create transaction ID
 	uint8_t txid[32];
 	double_sha256(segwit_tx, segwit_len, txid);
 	reverse_bytes(txid, 32);
-	free(segwit_tx);
+	g_free(segwit_tx, segwit_len);
 	// Sign
 	if (sign_transaction(&raw_tx_hex, selected, num_selected) != 0) {
 		fprintf(stderr, "Failure signing transaction\n");
 		free_utxos_array(selected, &num_selected, (size_t)num_selected);
-		free(raw_tx_hex);
+		g_free((void *)raw_tx_hex, strlen(raw_tx_hex));
 		return 1;
 	}
 	free_utxos_array(selected, &num_selected, (size_t)num_selected);
 	printf("Successfully signed transaction data\n");
 	if (broadcast_transaction(raw_tx_hex, &user->last_api_request) != 0) {
 		fprintf(stderr, "Failure broadcasting transaction\n");
-		free(raw_tx_hex);
+		g_free((void *)raw_tx_hex, strlen(raw_tx_hex));
 		return 1;
 	}
 	printf("This is your transaction ID, (in reverse byte order as per conventional blockchain explorers' standards) track it on the blockchain:\n");
 	print_bytes_as_hex("TXID", txid, 32);
-	free(raw_tx_hex);
+	g_free((void *)raw_tx_hex, strlen(raw_tx_hex));
 	return 0;
 }
 
@@ -985,14 +978,14 @@ int32 rbf_handle(User *user) {
 			break;
 		}
 	}
-	rbf_data_t *rbf_data = gcry_calloc_secure(1, sizeof(rbf_data_t));
+	rbf_data_t *rbf_data = (rbf_data_t *)g_calloc(sizeof(rbf_data_t));
 	if (!rbf_data) {
 		fprintf(stderr, "Error allocating rbf_data\n");
 		return 1;
 	}
 	if (query_rbf_transaction(tx_id, &rbf_data, &user->last_api_request) != 0) {
 		fprintf(stderr, "Unable to fetch transaction\n");
-		zero_and_gcry_free((void *)rbf_data, sizeof(rbf_data_t));
+		g_free((void *)rbf_data, sizeof(rbf_data_t));
 		return 1;	
 	}
 
@@ -1008,7 +1001,7 @@ int32 rbf_handle(User *user) {
 		fprintf(stderr, "Unable to fetch raw transaction hex data\n");
 		free_utxos_array(rbf_data->utxos, &(rbf_data->num_inputs), (size_t)rbf_data->num_inputs);
 		free_rbf_outputs_array(rbf_data->outputs, (size_t)rbf_data->num_outputs);
-		zero_and_gcry_free((void *)rbf_data, sizeof(rbf_data_t));
+		g_free((void *)rbf_data, sizeof(rbf_data_t));
 		return 1;
 	}
 
@@ -1016,7 +1009,7 @@ int32 rbf_handle(User *user) {
 		fprintf(stderr, "This transaction does not have RBF enabled on any of its inputs. Try a different transaction.\n");
 		free_utxos_array(rbf_data->utxos, &(rbf_data->num_inputs), (size_t)rbf_data->num_inputs);
 		free_rbf_outputs_array(rbf_data->outputs, (size_t)rbf_data->num_outputs);
-		zero_and_gcry_free((void *)rbf_data, sizeof(rbf_data_t));
+		g_free((void *)rbf_data, sizeof(rbf_data_t));
 		return 1;
 	}
 	printf("Transaction has RBF enabled, proceeding...\n");
@@ -1154,26 +1147,26 @@ int32 rbf_handle(User *user) {
 	uint8_t txid[32];
 	double_sha256(segwit_tx, segwit_len, txid);
 	reverse_bytes(txid, 32);
-	free(segwit_tx);
+	g_free((void *)segwit_tx, segwit_len);
 	// Sign
 	if (sign_transaction(&raw_tx_hex, rbf_data->utxos, rbf_data->num_inputs) != 0) {
 		fprintf(stderr, "Failure signing RBF transaction.\n");
 		free_complete_rbf(rbf_data);
-		free(raw_tx_hex);
+		g_free((void *)raw_tx_hex, strlen(raw_tx_hex));
 		return 1;
 	}
 	printf("Successfully signed transaction data\n");
 	if (broadcast_transaction(raw_tx_hex, &user->last_api_request) != 0) {
 		fprintf(stderr, "Failure broadcasting transaction\n");
 		free_complete_rbf(rbf_data);
-		free(raw_tx_hex);
+		g_free((void *)raw_tx_hex, strlen(raw_tx_hex));
 		return 1;
 	}
 	printf("Broadcast successful.\n");
 	printf("This is your transaction ID, (in reverse byte order as per conventional blockchain explorers' standards) track it on the blockchain:\n");
 	print_bytes_as_hex("TXID", txid, 32);
 	free_complete_rbf(rbf_data);
-	free(raw_tx_hex);
+	g_free((void *)raw_tx_hex, strlen(raw_tx_hex));
 	return 0;
 }
 
@@ -1226,7 +1219,7 @@ void main_loop(User *user) {
 int main() {
 	init_gcrypt();
 	User *user;
-	user = (User *)gcry_malloc_secure(sizeof(User));
+	user = (User *)g_malloc(sizeof(User));
 	if (!user) {
 		fprintf(stderr, "Failure to allocate user\n");
 		return 1;
@@ -1234,11 +1227,12 @@ int main() {
 	print_logo();
 	if (init_user(user) != 0) {
 		fprintf(stderr, "User secured allocation and setup failed.\n");
-		gcry_free(user);
+		gcry_free((void *)user);
 		return 1;
 	}
 	print_menu();
 	main_loop(user);
 	free_user(user);
+	free_all();
 	return 0;
 }

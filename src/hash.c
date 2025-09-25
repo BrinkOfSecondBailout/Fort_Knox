@@ -3,7 +3,7 @@
 #include "crypt.h"
 #include "common.h"
 #include "hash.h"
-
+#include "memory.h"
 const char *base58_chars = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const char *bech32_charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
 
@@ -200,7 +200,7 @@ char *base58_encode(const uint8_t *data, size_t data_len) {
 
 	// Convert to big int
 	size_t size = data_len * 138 / 100 + 1; // Approximate
-	uint8_t *temp = calloc(size, 1);
+	uint8_t *temp = (uint8_t *)g_calloc(size);
 	if (!temp) return NULL;
 	for (size_t i = 0; i < data_len; i++) {
 		int carry = data[i];
@@ -211,9 +211,9 @@ char *base58_encode(const uint8_t *data, size_t data_len) {
 		}
 	}
 	// Encode to chars
-	char *result = malloc(size + zeros + 1);
+	char *result = (char *)g_malloc(size + zeros + 1);
 	if (!result) {
-		free(temp);
+		g_free((void *)temp, size);
 		return NULL;
 	}
 	memset(result, '1', zeros);
@@ -224,7 +224,7 @@ char *base58_encode(const uint8_t *data, size_t data_len) {
 		}
 	}
 	result[pos] = '\0';
-	free(temp);
+	g_free((void *)temp, size);
 	return result;
 }
 

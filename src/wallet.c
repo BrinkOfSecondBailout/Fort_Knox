@@ -112,28 +112,28 @@ int pubkeyhash_to_address(const uint8_t *pub_key_hash, size_t pub_key_hash_len, 
 	const char *hrp = "bc"; // Mainnet, use 'tb' for testnet
 	size_t hrp_len = strlen(hrp);
 	size_t check_values_len = data_values_len + hrp_len * 2 + 7; // 1 for separator, 6 for '0' padding
-	uint8_t *check_values = gcry_malloc_secure(check_values_len);
+	uint8_t *check_values = (uint8_t*)g_calloc(check_values_len);
 	if (!check_values) return 1;
 	
 	size_t check_len = 0;
 	// Append all high bits (top 3 bits) for each character of HRP
 	for (size_t i = 0; i < hrp_len; i++) {
 		if (check_len >= check_values_len) {
-			gcry_free(check_values);
+			g_free((void *)check_values, check_values_len);
 			return 1;
 		}
 		check_values[check_len++] = hrp[i] >> 5;
 	}
 	// Append separator
 	if (check_len >= check_values_len) {
-		gcry_free(check_values);
+		g_free((void *)check_values, check_values_len);
 		return 1;
 	}
 	check_values[check_len++] = 0;
 	// Append all low bits (bottom 5 bits) for each character of HRP
 	for (size_t i = 0; i < hrp_len; i++) {
 		if (check_len >= check_values_len) {
-			gcry_free(check_values);
+			g_free((void *)check_values, check_values_len);
 			return 1;
 		}
 		check_values[check_len++] = hrp[i] & 31;
@@ -148,7 +148,7 @@ int pubkeyhash_to_address(const uint8_t *pub_key_hash, size_t pub_key_hash_len, 
 
     	// Compute checksum
     	uint32_t polymod = (bech32_polymod(check_values, check_len)) ^ 1;
-    	gcry_free(check_values);
+    	g_free((void *)check_values, check_values_len);
 
     	// Append checksum to data_values
     	for (size_t i = 0; i < 6; i++) {
@@ -196,7 +196,7 @@ int pubkey_to_address(const uint8_t *pub_key, size_t pub_key_len, char *address,
 	const char *hrp = "bc"; // Mainnet, use 'tb' for testnet
 	size_t hrp_len = strlen(hrp);
 	size_t check_values_len = data_values_len + hrp_len * 2 + 7; // 1 for separator, 6 for '0' padding
-	uint8_t *check_values = gcry_calloc_secure(1, check_values_len);
+	uint8_t *check_values = g_calloc(check_values_len);
 	if (!check_values) return 1;
 	zero((void *)check_values, check_values_len);
 	
@@ -204,21 +204,21 @@ int pubkey_to_address(const uint8_t *pub_key, size_t pub_key_len, char *address,
 	// Append all high bits (top 3 bits) for each character of HRP
 	for (size_t i = 0; i < hrp_len; i++) {
 		if (check_len >= check_values_len) {
-			gcry_free(check_values);
+			g_free((void *)check_values, check_values_len);
 			return 1;
 		}
 		check_values[check_len++] = hrp[i] >> 5;
 	}
 	// Append separator
 	if (check_len >= check_values_len) {
-		gcry_free(check_values);
+		g_free((void *)check_values, check_values_len);
 		return 1;
 	}
 	check_values[check_len++] = 0;
 	// Append all low bits (bottom 5 bits) for each character of HRP
 	for (size_t i = 0; i < hrp_len; i++) {
 		if (check_len >= check_values_len) {
-			gcry_free(check_values);
+			g_free((void*)check_values, check_values_len);
 			return 1;
 		}
 		check_values[check_len++] = hrp[i] & 31;
@@ -233,7 +233,7 @@ int pubkey_to_address(const uint8_t *pub_key, size_t pub_key_len, char *address,
 
     	// Compute checksum
     	uint32_t polymod = (bech32_polymod(check_values, check_len)) ^ 1;
-    	gcry_free(check_values);
+    	g_free((void *)check_values, check_values_len);
 
     	// Append checksum to data_values
     	for (size_t i = 0; i < 6; i++) {
@@ -461,7 +461,7 @@ int generate_address(const uint8_t *key_pub_compressed, char *address, size_t ad
 	// Encode
     	char *encoded = base58_encode(full, 25);
     	snprintf(address, address_len, "%s", encoded);
-    	free(encoded);
+    	g_free((void *)encoded, strlen(encoded));
     	return 0;
 }
 
@@ -486,135 +486,136 @@ int derive_from_account_to_change(const key_pair_t *account_key, uint32_t change
 int derive_from_master_to_account(const key_pair_t *master_key, uint32_t account_index, key_pair_t *account_key) {
 	// Derive from public to account - m/84'/0'/0'/account
 	key_pair_t *purpose_key = NULL;
-	purpose_key = gcry_malloc_secure(sizeof(key_pair_t));
+	purpose_key = (key_pair_t *)g_malloc(sizeof(key_pair_t));
 	if (!purpose_key) {
 		fprintf(stderr, "Error gcry malloc for purpose key\n");
 		return 1;
 	}
 	if (derive_child_key(master_key, HARD_FLAG | 84, purpose_key) != 0) { // m/84'
 		fprintf(stderr, "Failed to derive purpose key\n");
-		zero_and_gcry_free((void *)purpose_key, sizeof(key_pair_t));
+		g_free((void *)purpose_key, sizeof(key_pair_t));
 		return 1;
 	}
 	key_pair_t *coin_key = NULL;
-	coin_key = gcry_malloc_secure(sizeof(key_pair_t));
+	coin_key = (key_pair_t *)g_malloc(sizeof(key_pair_t));
 	if (!coin_key) {
 		fprintf(stderr, "Error gcry malloc for coin key\n");
-		zero_and_gcry_free((void *)purpose_key, sizeof(key_pair_t));
+		g_free((void *)purpose_key, sizeof(key_pair_t));
 		return 1;
 	}
 	if (derive_child_key(purpose_key, HARD_FLAG | 0, coin_key) != 0) { // m/84'/0'
 		fprintf(stderr, "Failed to derive coin key\n");
-		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)purpose_key, (void *)coin_key, NULL);
+		g_free_multiple(sizeof(key_pair_t), (void *)purpose_key, (void *)coin_key, NULL);
 		return 1;
 	}
 	
 	if (derive_child_key(coin_key, HARD_FLAG | account_index, account_key) != 0) { // m/84'/0'/account'
 		fprintf(stderr, "Failed to derive account 0 key\n");
-		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)purpose_key, (void *)coin_key, NULL);
+		g_free_multiple(sizeof(key_pair_t), (void *)purpose_key, (void *)coin_key, NULL);
 		return 1;
 	}
-	zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)purpose_key, (void *)coin_key, NULL);
+	g_free_multiple(sizeof(key_pair_t), (void *)purpose_key, (void *)coin_key, NULL);
 	return 0;
 } 
 
 int derive_from_master_to_coin(const key_pair_t *master_key, key_pair_t *coin_key) {
 	// Derive from public to account - m/84'/0'/0'/account
 	key_pair_t *purpose_key = NULL;
-	purpose_key = gcry_malloc_secure(sizeof(key_pair_t));
+	purpose_key = (key_pair_t *)g_malloc(sizeof(key_pair_t));
 	if (!purpose_key) {
 		fprintf(stderr, "Error gcry malloc for purpose key\n");
 		return 1;
 	}
 	if (derive_child_key(master_key, HARD_FLAG | 84, purpose_key) != 0) { // m/84'
 		fprintf(stderr, "Failed to derive purpose key\n");
-		zero_and_gcry_free((void *)purpose_key, sizeof(key_pair_t));
+		g_free((void *)purpose_key, sizeof(key_pair_t));
 		return 1;
 	}
 	if (derive_child_key(purpose_key, HARD_FLAG | 0, coin_key) != 0) { // m/84'/0'
 		fprintf(stderr, "Failed to derive coin key\n");
-		zero_and_gcry_free((void *)purpose_key, sizeof(key_pair_t));
+		g_free((void *)purpose_key, sizeof(key_pair_t));
 		return 1;
 	}
-	zero_and_gcry_free((void *)purpose_key, sizeof(key_pair_t));
+	g_free((void *)purpose_key, sizeof(key_pair_t));
 	return 0;
 }
 
 int derive_from_master_to_child(const key_pair_t *master_key, uint32_t account_index, uint32_t change_index, uint32_t child_index, key_pair_t *child_key) {
 	key_pair_t *account_key = NULL;
-	account_key = gcry_malloc_secure(sizeof(key_pair_t));
+	account_key = (key_pair_t *)g_malloc(sizeof(key_pair_t));
 	if (!account_key) {
 		fprintf(stderr, "Failure allocating account key\n");
 		return 1;
 	}
 	if (derive_from_master_to_account(master_key, account_index, account_key) != 0) {
 		fprintf(stderr, "Failure deriving from master to account\n");
-		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
+		g_free((void *)account_key, sizeof(key_pair_t));
 		return 1;
 	}
 	key_pair_t *change_key = NULL;
-	change_key = gcry_malloc_secure(sizeof(key_pair_t));
+	change_key = (key_pair_t *)g_malloc(sizeof(key_pair_t));
 	if (!change_key) {
 		fprintf(stderr, "Failure allocating change key\n");
-		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
+		g_free((void *)account_key, sizeof(key_pair_t));
 		return 1;
 	}
 	if (derive_from_account_to_change(account_key, change_index, change_key) != 0) {
 		fprintf(stderr, "Failure deriving from account to change\n");
-		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)change_key, (void *)account_key, NULL);	
+		g_free_multiple(sizeof(key_pair_t), (void *)change_key, (void *)account_key, NULL);	
 		return 1;
 	}
 	if (derive_from_change_to_child(change_key, child_index, child_key) != 0) {
 		fprintf(stderr, "Failure deriving from change to child\n");
-		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)change_key, (void *)account_key, NULL);	
+		g_free_multiple(sizeof(key_pair_t), (void *)change_key, (void *)account_key, NULL);	
 		return 1;
 	}
+	g_free_multiple(sizeof(key_pair_t), (void *)change_key, (void *)account_key, NULL);	
 	return 0;
 }
 
 int generate_receive_address(const key_pair_t *master_key, char *address, uint32_t account_index, uint32_t child_index) {
 	// Work our way down the path to m/84'/0'/0'/account
 	key_pair_t *account_key;
-	account_key = gcry_malloc_secure(sizeof(key_pair_t));
+	account_key = (key_pair_t *)g_malloc(sizeof(key_pair_t));
 	if (!account_key) {
 		fprintf(stderr, "Error gcry_malloc_secure\n");
 		return 1;
 	}
 	if (derive_from_master_to_account(master_key, account_index, account_key) != 0) { // m/84'/0'/account'
 		fprintf(stderr, "Failed to derive account key\n");
-		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
+		g_free((void *)account_key, sizeof(key_pair_t));
 		return 1;
 	}
 	key_pair_t *change_key;
-	change_key = gcry_malloc_secure(sizeof(key_pair_t));
+	change_key = (key_pair_t *)g_malloc(sizeof(key_pair_t));
 	if (!change_key) {
 		fprintf(stderr, "Error gcry_malloc_secure\n");
-		zero_and_gcry_free((void *)account_key, sizeof(key_pair_t));
+		g_free((void *)account_key, sizeof(key_pair_t));
 		return 1;
 	}
 	if (derive_from_account_to_change(account_key, (uint32_t)0, change_key) != 0) {
 		fprintf(stderr, "Failed to derive change key\n");
-		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
+		g_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
 		return 1;
 	}
 	key_pair_t *child_key;
-	child_key = gcry_malloc_secure(sizeof(key_pair_t));
+	child_key = (key_pair_t *)g_malloc(sizeof(key_pair_t));
 	if (!child_key) {
 		fprintf(stderr, "Error gcry_malloc_secure\n");
-		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
+		g_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, NULL);
 		return 1;
 	}
 	if (derive_from_change_to_child(change_key, child_index, child_key) != 0) {
 		fprintf(stderr, "Failed to derive child key\n");
-		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);
+		g_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);
 		return 1;
 	}
 	if (pubkey_to_address(child_key->key_pub_compressed, PUBKEY_LENGTH, address, ADDRESS_MAX_LEN) != 0) {
 		fprintf(stderr, "Failed to generate receive address.\n");
-		zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);	
+		g_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);	
 		return 1;
 	}
 	// Clean up intermediate keys
-	zero_and_gcry_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);	
+	g_free_multiple(sizeof(key_pair_t), (void *)account_key, (void *)change_key, (void *)child_key, NULL);	
 	return 0;
 }

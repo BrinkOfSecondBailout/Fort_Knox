@@ -1,7 +1,6 @@
 /* memory.c */
 
 #include "memory.h"
-#include "crypt.h"
 #include "hash.h"
 
 mempool_t *mempool;
@@ -38,21 +37,6 @@ void zero_and_gcry_free_multiple(size_t size, void *buf, ...) {
 	}
 	va_end(args);
 }
-
-void free_all() {	
-	object_t *temp = NULL;
-	object_t *curr = mempool->head;
-	while (curr) {
-		temp = curr->next;
-		zero_and_gcry_free(curr->object, sizeof(curr->object));
-		mempool->total_bytes -= sizeof(curr->object);
-		curr = temp;
-	}
-	printf("All objects in mempool freed.\n");
-	printf("Mempool total bytes: %ld\n", mempool->total_bytes);
-	return;
-}
-
 void remove_from_mempool(void *object, size_t size) {
 	object_t *previous = NULL;
 	object_t *curr = NULL;
@@ -63,7 +47,9 @@ void remove_from_mempool(void *object, size_t size) {
 				previous->next = curr->next;
 			}
 			zero_and_gcry_free(object, size);
+			gcry_free(curr->object);
 			mempool->total_bytes -= size;
+			mempool->total_bytes -= sizeof(object_t *);
 			return;
 		}
 		previous = curr;
@@ -74,7 +60,7 @@ void remove_from_mempool(void *object, size_t size) {
 }
 
 void add_to_mempool(void *object, size_t size) {
-	if (mempool->total_bytes + size >= mempool->total_capacity) {
+	if (mempool->total_bytes + size + sizeof(object_t *) >= mempool->total_capacity) {
 		fprintf(stderr, "Memory exceeded. Shutting down.\n");
 		free_all();
 		exit(1);
@@ -84,76 +70,96 @@ void add_to_mempool(void *object, size_t size) {
 		while (curr->next != NULL) {
 			curr = curr->next;
 		}
+		curr->next = gcry_malloc_secure(sizeof(object_t *));
 		curr->next->object = object;
 	} else {
+		mempool->head = gcry_malloc_secure(sizeof(object_t *));
 		mempool->head->object = object;
 	}
-	mempool->total_bytes += size;
+	mempool->total_bytes += sizeof(object_t *);
 	return;
 }
 
 void *g_malloc(size_t size) {
 	void *result = gcry_malloc_secure(size);
-	if (!result) {
-		fprintf(stderr, "Unable to allocate object in mempool.\n");
-		free_all();
-		exit(1);
-	}
+	mempool->total_bytes += size;
 	add_to_mempool(result, size);
 	return result;
 }
 
 void *g_calloc(size_t size) {
 	void *result = gcry_calloc_secure(1, size);
-	if (!result) {
-		fprintf(stderr, "Unable to allocate object in mempool.\n");
-		free_all();
-		exit(1);
-	}
+	mempool->total_bytes += size;
 	add_to_mempool(result, size);
 	return result;
 }
 
-void g_free(void *object) {
-	remove_from_mempool(object, sizeof(object));
+void g_free(void *object, size_t size) {
+	remove_from_mempool(object, size);
 	return;
 }
 
+void g_free_multiple(size_t size, void *object, ...) {
+	va_list args;
+	va_start(args, object);
+	void *ptr;
+	while ((ptr = va_arg(args, void *)) != NULL) {
+		g_free(ptr, size);
+	}
+	va_end(args);
+}
+
+void free_all() {	
+	printf("Free all remaining objects in mempool.\n");
+	object_t *temp = NULL;
+	object_t *curr = mempool->head;
+	while (curr != NULL) {
+		temp = curr->next;
+		if (curr->object) g_free((void *)curr->object, sizeof(curr->object));
+		curr = temp;
+	}
+	printf("All objects in mempool freed.\n");
+	printf("Mempool total bytes: %ld\n", mempool->total_bytes);
+	zero_and_gcry_free(mempool, sizeof(mempool_t));
+	return;
+}
+
+
 void free_rbf_outputs_array(rbf_output_t **outputs, size_t j) {
 	for (size_t i = 0; i < j; i++) {
-		if (outputs[i] != NULL) g_free((void *)outputs[i]);
+		if (outputs[i] != NULL) g_free((void *)outputs[i], sizeof(rbf_output_t));
 	}
-	g_free((void *)outputs);
+	g_free((void *)outputs, sizeof(rbf_output_t **));
 }
 
 void free_utxos_array(utxo_t **utxos, int *num_utxos, size_t j) {
 	for (size_t i = 0; i < j; i++) {
-		if (utxos[i]->key != NULL) g_free((void *)utxos[i]->key);
-		if (utxos[i] != NULL) g_free((void *)utxos[i]);
+		if (utxos[i]->key != NULL) g_free((void *)utxos[i]->key, sizeof(key_pair_t));
+		if (utxos[i] != NULL) g_free((void *)utxos[i], sizeof(utxo_t));
 	}
-	g_free((void *)utxos);
+	g_free((void *)utxos, *num_utxos * sizeof(utxo_t **));
 	*num_utxos = 0;
 }
 
 void free_complete_rbf(rbf_data_t *rbf_data) {
-	g_free((void *)rbf_data->raw_tx_hex);
+	g_free((void *)rbf_data->raw_tx_hex, sizeof(rbf_data->raw_tx_hex));
 	free_utxos_array(rbf_data->utxos, &(rbf_data->num_inputs), (size_t)rbf_data->num_inputs);
 	free_rbf_outputs_array(rbf_data->outputs, (size_t)rbf_data->num_outputs);
-	g_free((void *)rbf_data);	
+	g_free((void *)rbf_data, sizeof(rbf_data_t *));
 }
 
 void free_addresses_and_keys(char **addresses, key_pair_t **child_keys, int num_addresses_and_keys) {
 	for (size_t i = 0; i < num_addresses_and_keys; i++) {
-		g_free((void *)addresses[i]);
-		if (child_keys[i] != NULL) g_free((void *)child_keys[i]);
+		g_free((void *)addresses[i], ADDRESS_MAX_LEN);
+		if (child_keys[i] != NULL) g_free((void *)child_keys[i], sizeof(key_pair_t));
 	}
-	g_free((void *)addresses);
-	g_free((void *)child_keys);
+	g_free((void *)addresses, num_addresses_and_keys * sizeof(char *));
+	g_free((void *)child_keys, num_addresses_and_keys * sizeof(key_pair_t *));
 }
 
-void free_addresses(char **addresses, size_t i) {
-	for (size_t j = 0; j < i; j++) g_free((void *)addresses[j]);
-	g_free((void *)addresses);
+void free_addresses(char **addresses, size_t i, size_t num_addresses) {
+	for (size_t j = 0; j < i; j++) g_free((void *)addresses[j], ADDRESS_MAX_LEN);
+	g_free((void *)addresses, num_addresses * sizeof(char *));
 }
 
 gcry_error_t init_gcrypt() {
@@ -184,10 +190,16 @@ gcry_error_t init_gcrypt() {
 		fprintf(stderr, "Gcrypt initialization completion failed\n");
                 exit(EXIT_FAILURE);
 	}
+
+	mempool = gcry_malloc_secure(sizeof(mempool_t));
+	if (!mempool) {
+		fprintf(stderr, "Failure allocating main mempool. Exiting.\n");
+		exit(1);
+	}
 	mempool->head = NULL;
 	mempool->total_bytes = 0;
 	mempool->total_capacity = MEMPOOL_CAPACITY;
-	
+
 	err = gcry_control(GCRYCTL_INITIALIZATION_FINISHED_P);
 	return err;
 }

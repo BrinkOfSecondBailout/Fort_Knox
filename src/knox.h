@@ -4,6 +4,8 @@
 #define KNOX_H
 #include "wallet.h"
 
+#define ACCOUNTS_CAPACITY 3
+
 typedef unsigned int int32;
 
 typedef struct {
@@ -41,5 +43,4 @@ int32 rbf_handle(User *);
 int32 help_handle(User *);
 int32 menu_handle(User *);
 int32 exit_handle(User *);
-void increment_account_used_index(account_t *);
 #endif
