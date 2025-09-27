@@ -182,7 +182,7 @@ int fetch_rbf_raw_tx_hex(char *tx_id, rbf_data_t *rbf_data, time_t *last_request
 	strncpy(rbf_data->raw_tx_hex, buffer.data, buffer.size);
 	rbf_data->raw_tx_hex[buffer.size] = '\0';
 	free(buffer.data);
-printf("Raw TX: %s\n", rbf_data->raw_tx_hex);
+//printf("Raw TX: %s\n", rbf_data->raw_tx_hex);
 	return 0;
 }
 

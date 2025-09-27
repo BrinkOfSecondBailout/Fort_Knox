@@ -178,7 +178,8 @@ int pubkey_to_address(const uint8_t *pub_key, size_t pub_key_len, char *address,
 	uint8_t ripemd160[20];
 	gcry_md_hash_buffer(GCRY_MD_RMD160, ripemd160, sha256, 32); // This is the PubKeyHash aka Witness Program
 	// Convert PubKeyHash aka Witness Program to 5-bit groups
-	uint8_t program_values[BECH32_VALUES_MAX];
+	uint8_t program_values[BECH32_VALUES_MAX] = {0};
+	zero((void *)program_values, BECH32_VALUES_MAX);
 	size_t program_values_len;
 	convert_bits(program_values, &program_values_len, ripemd160, 20, 8, 5, 1);
 	if (program_values_len != 32) { // Expected for 20 bytes (160 bits / 5 = 32, no pad)
@@ -198,7 +199,6 @@ int pubkey_to_address(const uint8_t *pub_key, size_t pub_key_len, char *address,
 	size_t check_values_len = data_values_len + hrp_len * 2 + 7; // 1 for separator, 6 for '0' padding
 	uint8_t *check_values = g_calloc(check_values_len);
 	if (!check_values) return 1;
-	zero((void *)check_values, check_values_len);
 	
 	size_t check_len = 0;
 	// Append all high bits (top 3 bits) for each character of HRP
@@ -230,11 +230,9 @@ int pubkey_to_address(const uint8_t *pub_key, size_t pub_key_len, char *address,
 	// Append six zeros for padding
 	memset(check_values + check_len, 0, 6);
 	check_len += 6;
-
     	// Compute checksum
     	uint32_t polymod = (bech32_polymod(check_values, check_len)) ^ 1;
     	g_free((void *)check_values, check_values_len);
-
     	// Append checksum to data_values
     	for (size_t i = 0; i < 6; i++) {
         	if (data_values_len >= BECH32_VALUES_MAX) return 1;

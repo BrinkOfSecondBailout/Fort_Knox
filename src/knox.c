@@ -47,11 +47,11 @@ int init_user(User *user) {
 	user->accounts_capacity = ACCOUNTS_CAPACITY;
 	user->last_api_request = 0;
 	user->last_price_cached = 0.0;
-	double price = get_bitcoin_price(&user->last_api_request);
-	if (price > 0.0) {
-		user->last_price_cached = price;
-	}
-	user->last_api_request = time(NULL);
+	//double price = get_bitcoin_price(&user->last_api_request);
+	//if (price > 0.0) {
+	//	user->last_price_cached = price;
+	//}
+	//user->last_api_request = time(NULL);
 	return 0;
 }
 
@@ -174,7 +174,11 @@ int32 price_handle(User *user) {
 		}
 		return 1;
 	}
-	printf("Bitcoin price: %.2f\n", price);	
+	
+	if (price > 0.0) {
+		user->last_price_cached = price;
+	}
+	printf(GREEN"Bitcoin price: %.2f\n"RESET, price);	
 	return 0;
 }
 
@@ -182,11 +186,9 @@ int32 new_handle(User *user) {
 	char cmd[256];
 	int result;
 	if (has_wallet(user)) {
-		result = command_loop(cmd, 256, "You already have a wallet set in this current account.\n"
-					"Would you like to generate a new one anyways and overwrite?\n"
-					"Type 'yes' or 'no'\n", 
-					"yes", 
-					"no", 
+		printf("You already have a wallet set in this current account.\n"
+			"Would you like to generate a new one anyways and overwrite?\n");
+		result = command_loop(cmd, 256, "Type 'yes' or 'no'", "yes", "no", 
 					"Okay, overwriting old wallet.", 
 					"Got it, we'll keep existing wallet.");
 		if (result < 0) {
@@ -203,7 +205,7 @@ int32 new_handle(User *user) {
 	int nword;
 	while (1) {
 		zero((void *)cmd, sizeof(cmd));
-		printf("Select your recovery seed phrase word count (12, 15, 18, 21, 24)\n"
+		printf(YELLOW"Select your recovery seed phrase word count (12, 15, 18, 21, 24)\n"RESET
 			"Note: the higher the number, the larger the entropy AKA more cryptographically secured\n> ");
 		if (!fgets(cmd, sizeof(cmd), stdin)) {
 			fprintf(stderr, "fgets() failure\n");
@@ -232,7 +234,7 @@ int32 new_handle(User *user) {
 		zero((void *)passphrase, 256);
 		print_red("Remember that funds sent to this wallet will always need this passphrase to be recovered!");
 		printf("Think of this passphrase as the %dth word of your mnemonic seed, you MUST have it\n"
-			"Enter your passphrase (*CASE SENSITIVE*) (up to 256 characters)\n> ", nword + 1);
+			YELLOW"Enter your passphrase (*CASE SENSITIVE*) (up to 256 characters)\n> "RESET, nword + 1);
 		if (!fgets(passphrase, 256, stdin)) {
 			fprintf(stderr, "Error reading passphrase input\n");
 			exit_handle(user);
@@ -296,11 +298,9 @@ int32 recover_handle(User *user) {
 	int nword;
 	int result;
 	if (has_wallet(user)) {
-		result = command_loop(cmd, 256, "You already have a wallet set in this current account.\n"
-					"Would you like to generate a new one anyways and overwrite?\n"
-					"Type 'yes' or 'no'\n", 
-					"yes", 
-					"no", 
+		printf("You already have a wallet set in this current account.\n"
+			"Would you like to generate a new one anyways and overwrite?\n");
+		result = command_loop(cmd, 256, "Type 'yes' or 'no'", "yes", "no", 
 					"Okay, overwriting old wallet.", 
 					"Got it, we'll keep existing wallet.");
 		if (result < 0) {
@@ -312,7 +312,7 @@ int32 recover_handle(User *user) {
 
 	printf("Highly recommended that you turn your internet off for this part\n");
 	while (1) {
-		printf("How many words are your mnemonic seed phrase?\n"
+		printf(YELLOW"How many words are your mnemonic seed phrase?\n"RESET
 			"Enter one of these numbers (12, 15, 18, 21, 24)\n"
 			"> ");
 		zero((void *)cmd, sizeof(cmd));
@@ -337,7 +337,7 @@ int32 recover_handle(User *user) {
 	printf("Got it! You have a %d words mnemonic seed phrase.\n", nword);
 	printf("Example: habit eager gallery cabbage interest vacuum unaware wait invest gap game lab\n> ");
 	while (1) {
-		printf("Enter your %d words mnemonic seed phrase, each separated by a single space, like the example above.\n> ", nword);
+		printf(YELLOW"Enter your %d words mnemonic seed phrase, each separated by a single space, like the example above.\n> "RESET, nword);
 		zero((void *)mnemonic, sizeof(mnemonic));
 		if (!fgets(mnemonic, sizeof(mnemonic), stdin)) {
 			fprintf(stderr, "fgets() failure\n");
@@ -374,7 +374,7 @@ int32 recover_handle(User *user) {
 		zero((void *)passphrase, 256);
 		print_red("Remember that funds sent to this wallet will always need this passphrase to be recovered!");
 		printf("Think of this passphrase as the %dth word of your mnemonic seed, you MUST have it\n"
-			"Enter your passphrase (*CASE SENSITIVE*) (up to 256 characters)\n> ", nword + 1);
+			YELLOW"Enter your passphrase (*CASE SENSITIVE*) (up to 256 characters)\n> "RESET, nword + 1);
 		if (!fgets(passphrase, 256, stdin)) {
 			fprintf(stderr, "Error reading passphrase input\n");
 			exit_handle(user);
@@ -420,7 +420,7 @@ int32 recover_handle(User *user) {
 int32 key_handle(User *user) {
 	if (!has_wallet(user)) {
 		printf("No wallet available for this command. Please generate a new wallet or recover your existing one.\n"
-		"Type 'new' or 'recover' to begin\n");
+		YELLOW"Type 'new' or 'recover' to begin\n"RESET);
 		return 1;
 	}
 	printf("This function allows you to serialize your key in an easier-to-read format.\n"
@@ -428,7 +428,7 @@ int32 key_handle(User *user) {
 		"or your 'account' public key (to import into a watch-only wallet)\n");
 	char cmd[256];
 	while (1) {	
-		printf("Type 'master' or 'account' for the key you want > ");
+		printf(YELLOW"Type 'master' or 'account' for the key you want > "RESET);
 		zero((void *)cmd, 256);
 		if (!fgets(cmd, 256, stdin)) {
 			fprintf(stderr, "Failure reading user command\n");
@@ -455,7 +455,7 @@ int32 key_handle(User *user) {
 	} else {
 		printf("Account public key it is, serializing now...\n");
 		uint32_t account_index;
-		printf("What account do you want to use?\n\n"
+		printf(YELLOW"What account do you want to use?\n\n"RESET
 		"Keep in mind that this wallet uses the derivation path of BIP84, which is: m/84'/0'/0'/0/0,\n"
 		"meaning this is a Native Segwit (P2WPKH) account, its public addresses will always start with 'bc1q'.\n"
 		"We recommend using account 0 as per the BIP44 standard, but enter any number you wish between 0 - 3.\n"
@@ -468,7 +468,7 @@ int32 key_handle(User *user) {
 		"that account 0 should be used instead.\n");
 		while (1) {
 			zero((void*)cmd, sizeof(cmd));
-			printf("Enter account number between 0-3: (recommended - 0) > ");
+			printf(YELLOW"Enter account number between 0-3: (recommended - 0) > "RESET);
 			if (!fgets(cmd, sizeof(cmd), stdin)) {
 				fprintf(stderr, "fgets failure\n");
 				return 1;
@@ -555,7 +555,7 @@ int32 balance_handle(User *user) {
 	char cmd[256];
 	uint32_t account_index;
 	while(1) {
-		printf("Please enter the account number you'd like to see the balance of (between 0 - 100)\n"
+		printf(YELLOW"Please enter the account number you'd like to see the balance of (between 0 - 100)\n"RESET
 			"Keep in mind that on this app, you are limited to only receiving funds on account 0-3,\n"
 			"If you use a higher account on a different wallet software, we can scan it here, (up to 20 indexes).\n"
 			"Enter account number to check balance on: > ");
@@ -630,7 +630,7 @@ int32 receive_handle(User *user) {
 	}
 	char cmd[256];
 	uint32_t account_index;
-	printf("What account do you want to use?\n"
+	printf(YELLOW"What account do you want to use?\n"RESET
 		"We recommend using account 0 as per the BIP44 standard, but enter any number you wish between 0 - 3.\n"
 		"We try to keep track of your used accounts for you, but you must also be responsible for them yourself\n"
 		"Some bitcoiners prefer keeping accounts separate for different purposes,\n"
@@ -644,7 +644,7 @@ int32 receive_handle(User *user) {
 
 	while (1) {
 		zero((void*)cmd, sizeof(cmd));
-		printf("Enter account number between 0-3: (recommended - 0) > ");
+		printf(YELLOW"Enter account number between 0-3: (recommended - 0) > "RESET);
 		if (!fgets(cmd, sizeof(cmd), stdin)) {
 			fprintf(stderr, "fgets failure\n");
 			return 1;
@@ -719,7 +719,7 @@ int32 send_handle(User *user) {
 	char cmd[256];
 	uint32_t account_index;
 	while(1) {
-		printf("Please enter the account number you'd like to send from (between 0 - 100)\n"
+		printf(YELLOW"Please enter the account number you'd like to send from (between 0 - 100)\n"RESET
 			"We will query the blockchain to make sure you have enough UTXOs balance in this account to send funds.\n"
 			"Enter account number: > ");
 		zero((void *)cmd, 256);
@@ -767,7 +767,7 @@ int32 send_handle(User *user) {
 	}
 	char recipient[ADDRESS_MAX_LEN];
 	long long amount;
-	printf("Enter recipient address, be sure to verify thoroughly:\n"
+	printf(YELLOW"Enter recipient address, be sure to verify thoroughly:\n"RESET
 		"(we do not check and verify recipient address as of this version, please be sure to enter it correctly)\n> ");
 	zero((void *)recipient, ADDRESS_MAX_LEN);
 	if (!fgets(recipient, ADDRESS_MAX_LEN, stdin)) {
@@ -789,7 +789,7 @@ int32 send_handle(User *user) {
 	}
 	while (1) {
 		zero((void *)cmd, 256);
-		printf("Enter amount you wish to send in satoshis (Your balance: %lld):\n"
+		printf(YELLOW"Enter amount you wish to send in satoshis (Your balance: %lld):\n"RESET
 		"> ", total_balance);
 		if (!fgets(cmd, 256, stdin)) {
 			fprintf(stderr, "Error reading command\n");
@@ -824,7 +824,7 @@ int32 send_handle(User *user) {
 		priority_rate, priority_rate / SATS_PER_BTC,
 		regular_rate * (long long)estimate_transaction_size(1, 2),
 		priority_rate * (long long)estimate_transaction_size(1, 2));
-	printf("\nHow much would you like to spend on fees?\n"
+	printf(YELLOW"\nHow much would you like to spend on fees?\n"RESET
 		"Keep in mind, the higher you spend, the faster your transaction will be added to the next block.\n"
 		"If you choose the regular fee rate, confirmation time will be ~1 hour.\n"
 		"Or if you choose the priority rate, confirmation time will be ~10 minutes.\n"
@@ -847,7 +847,7 @@ int32 send_handle(User *user) {
 		}
 	}
 	int rbf = 0;
-	printf("Do you want to mark this transaction as RBF-enabled?\n\n"
+	printf(YELLOW"Do you want to mark this transaction as RBF-enabled?\n\n"RESET
 		"(Replace-By-Fee: by having this enabled, you can later 'replace' the transaction in the mempool by doubling\n"
 		"the fee-rate of the original transaction, essentially 'speeding up' how fast it ends up in the next block\n"
 		"by incentivizing miners with a higher fee.)\n"); 
@@ -938,7 +938,7 @@ int32 rbf_handle(User *user) {
 	char cmd[256];
 	while (1) {
 		zero((void *)cmd, 256);
-		printf("Do you have an RBF-enabled transaction currently in the mempool?\nType 'yes' or 'no' > ");
+		printf(YELLOW"Do you have an RBF-enabled transaction currently in the mempool?\nType 'yes' or 'no' > "RESET);
 		if (!fgets(cmd, 256, stdin)) {
 			fprintf(stderr, "Error reading command\n");
 			continue;
@@ -960,7 +960,7 @@ int32 rbf_handle(User *user) {
 			return 0;
 		}
 	}
-	printf("Please provide the transaction ID of the unconfirmed RBF-enabled tx in the mempool you'd like to replace.\n");
+	printf(YELLOW"Please provide the transaction ID of the unconfirmed RBF-enabled tx in the mempool you'd like to replace.\n"RESET);
 	char tx_id[256];
 	while (1) {
 		printf("TXID > ");
@@ -1001,6 +1001,7 @@ int32 rbf_handle(User *user) {
 		fprintf(stderr, "Unable to fetch raw transaction hex data\n");
 		free_utxos_array(rbf_data->utxos, &(rbf_data->num_inputs), (size_t)rbf_data->num_inputs);
 		free_rbf_outputs_array(rbf_data->outputs, (size_t)rbf_data->num_outputs);
+		g_free((void *)rbf_data->raw_tx_hex, MAX_RAW_TX_HEX);
 		g_free((void *)rbf_data, sizeof(rbf_data_t));
 		return 1;
 	}
@@ -1009,11 +1010,12 @@ int32 rbf_handle(User *user) {
 		fprintf(stderr, "This transaction does not have RBF enabled on any of its inputs. Try a different transaction.\n");
 		free_utxos_array(rbf_data->utxos, &(rbf_data->num_inputs), (size_t)rbf_data->num_inputs);
 		free_rbf_outputs_array(rbf_data->outputs, (size_t)rbf_data->num_outputs);
+		g_free((void *)rbf_data->raw_tx_hex, MAX_RAW_TX_HEX);
 		g_free((void *)rbf_data, sizeof(rbf_data_t));
 		return 1;
 	}
 	printf("Transaction has RBF enabled, proceeding...\n");
-	printf("What was the account index used to derive the UTXO input(s) for this transaction?\n"
+	printf(YELLOW"What was the account index used to derive the UTXO input(s) for this transaction?\n"RESET
 		"In order to build and sign a new replacement transaction, we will attempt to\n"
 		"locate and match a private key to your UTXO input(s)\n");
 	while (1) {
@@ -1057,7 +1059,8 @@ int32 rbf_handle(User *user) {
 		return 1;
 	}
 	while (1) {
-		printf("The new fee amount is %lld sats. Proceed?\nType 'yes' or 'no' (or 'exit' to quit) > ", rbf_data->new_fee);
+		printf("The new fee amount is %lld sats. Proceed?\n"
+			YELLOW"Type 'yes' or 'no' (or 'exit' to quit) > "RESET, rbf_data->new_fee);
 		zero((void *)cmd, 256);
 		if (!fgets(cmd, 256, stdin)) {
 			fprintf(stderr, "Error reading command\n");

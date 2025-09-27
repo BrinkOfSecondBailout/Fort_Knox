@@ -459,9 +459,11 @@ int run_serialize_key_test() {
 	printf("Result  : %s\n", output);
 	if (strncmp(output, expected, strlen(expected)) != 0) {
 		printf(RED"FAILED\n"RESET);
+		gcry_free((void *)output);
 		return 1;
 	}
-	printf(GREEN"PASSED\n"RESET);	
+	printf(GREEN"PASSED\n"RESET);
+	gcry_free((void *)output);
 	return 0;
 }
 

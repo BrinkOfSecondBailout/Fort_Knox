@@ -26,7 +26,7 @@ void print_commands(const char *commands, ...) {
 int command_loop(char *buffer, size_t len, const char *command, const char *pass, const char *fail, const char *pass_reply, const char *fail_reply) {
 	while (1) {
 		memset(buffer, 0, len);
-		printf("%s\n", command);
+		printf(YELLOW"%s\n"RESET, command);
 		printf("> ");
 		if (!fgets(buffer, len, stdin)) {
 			fprintf(stderr, "Error reading command\n");

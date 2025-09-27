@@ -3,7 +3,7 @@
 #include "mnemonic.h"
 #include "wallet.h"
 #include "bip39_words.h"
-#include "crypt.h"
+#include "memory.h"
 
 int mnemonic_to_seed(const char *mnemonic, const char *passphrase, uint8_t *seed_buffer) {
         // Use PBKDF2 to derive seed (BIP-39)

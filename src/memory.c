@@ -37,58 +37,68 @@ void zero_and_gcry_free_multiple(size_t size, void *buf, ...) {
 	}
 	va_end(args);
 }
+
 void remove_from_mempool(void *object, size_t size) {
-	object_t *previous = NULL;
-	object_t *curr = NULL;
-	curr = mempool->head;
-	while (curr) {
+	object_t *prev = NULL;
+	object_t *curr = mempool->head;
+	while (curr != NULL) {
 		if (curr->object == object) {
-			if (previous) {
-				previous->next = curr->next;
-			}
 			zero_and_gcry_free(object, size);
-			//gcry_free(curr->object);
-			mempool->total_bytes -= size;
-			mempool->total_bytes -= sizeof(object_t *);
+			curr->object = NULL;
+			if (prev == NULL) {
+				mempool->head = curr->next;
+			} else {
+				prev->next = curr->next;
+			}
+			gcry_free(curr);
+			mempool->total_bytes -= (size + sizeof(object_t));
 			return;
 		}
-		previous = curr;
+		prev = curr;
 		curr = curr->next;
 	}
-	fprintf(stderr, "Cannot find object to free in mempool\n");
-	exit(1);
+	fprintf(stderr, "Cannot find object %p in mempool\n", object);
+	return;
 }
 
 void add_to_mempool(void *object, size_t size) {
-	if (mempool->total_bytes + size + sizeof(object_t *) >= mempool->total_capacity) {
+	if (mempool->total_bytes + size + sizeof(object_t) >= mempool->total_capacity) {
 		fprintf(stderr, "Memory exceeded. Shutting down.\n");
 		free_all();
 		exit(1);
+	}	
+	object_t *node = (object_t *)gcry_malloc_secure(sizeof(object_t ));
+	mempool->total_bytes += sizeof(object_t);
+	if (!node) {
+		fprintf(stderr, "Failure allocating object.\n");
+		free_all();
+		exit(1);
 	}
-	if (mempool->head) {
-		object_t *curr = mempool->head;
-		while (curr->next != NULL) {
-			curr = curr->next;
-		}
-		curr->next = gcry_malloc_secure(sizeof(object_t *));
-		curr->next->object = object;
-	} else {
-		mempool->head = gcry_malloc_secure(sizeof(object_t *));
-		mempool->head->object = object;
-	}
+	node->object = object;
 	mempool->total_bytes += size;
-	mempool->total_bytes += sizeof(object_t *);
+	node->next = mempool->head;
+	mempool->head = node;
 	return;
 }
 
 void *g_malloc(size_t size) {
 	void *result = gcry_malloc_secure(size);
+	if (!result) {
+		fprintf(stderr, "Failure allocating item.\n");
+		free_all();
+		exit(1);
+	}
 	add_to_mempool(result, size);
 	return result;
 }
 
 void *g_calloc(size_t size) {
 	void *result = gcry_calloc_secure(1, size);
+	if (!result) {
+		fprintf(stderr, "Failure allocating item.\n");
+		free_all();
+		exit(1);
+	}
 	add_to_mempool(result, size);
 	return result;
 }
@@ -108,17 +118,27 @@ void g_free_multiple(size_t size, void *object, ...) {
 	va_end(args);
 }
 
+
+void init_mempool() {
+	mempool->head = NULL;
+	mempool->total_bytes = 0;
+	mempool->total_capacity = MEMPOOL_CAPACITY;
+}
+
 void free_all() {	
-	printf("Free all remaining objects in mempool.\n");
+	printf("Freeing all remaining objects in mempool.\n");
 	object_t *temp = NULL;
 	object_t *curr = mempool->head;
-	while (curr != NULL) {
+	while (curr) {
 		temp = curr->next;
-		if (curr->object) g_free((void *)curr->object, sizeof(curr->object));
+		mempool->total_bytes -= (sizeof(curr->object) + sizeof(object_t));
+		gcry_free((void *)curr->object);
+		gcry_free((void *)curr);
 		curr = temp;
 	}
 	printf("All objects in mempool freed.\n");
 	printf("Mempool total bytes: %ld\n", mempool->total_bytes);
+	init_mempool();	
 	zero_and_gcry_free(mempool, sizeof(mempool_t));
 	return;
 }
@@ -128,7 +148,7 @@ void free_rbf_outputs_array(rbf_output_t **outputs, size_t j) {
 	for (size_t i = 0; i < j; i++) {
 		if (outputs[i] != NULL) g_free((void *)outputs[i], sizeof(rbf_output_t));
 	}
-	g_free((void *)outputs, sizeof(rbf_output_t **));
+	g_free((void *)outputs, j * sizeof(rbf_output_t **));
 }
 
 void free_utxos_array(utxo_t **utxos, int *num_utxos, size_t j) {
@@ -189,15 +209,12 @@ gcry_error_t init_gcrypt() {
 		fprintf(stderr, "Gcrypt initialization completion failed\n");
                 exit(EXIT_FAILURE);
 	}
-
 	mempool = gcry_malloc_secure(sizeof(mempool_t));
 	if (!mempool) {
 		fprintf(stderr, "Failure allocating main mempool. Exiting.\n");
 		exit(1);
 	}
-	mempool->head = NULL;
-	mempool->total_bytes = 0;
-	mempool->total_capacity = MEMPOOL_CAPACITY;
+	init_mempool();	
 
 	err = gcry_control(GCRYCTL_INITIALIZATION_FINISHED_P);
 	return err;

@@ -13,11 +13,13 @@ typedef struct {
 } curl_buffer_t;
 
 size_t curl_write_callback_func(void *, size_t, size_t, void *);
+int set_curl_run_curl(CURL *, char *, curl_buffer_t *, time_t *);
 double get_bitcoin_price(time_t *);
 int init_curl_and_addresses(const char **, int, curl_buffer_t *, time_t *);
 int estimate_transaction_size(int, int);
 int get_fee_rate(long long *, long long *, time_t *);
 size_t curl_write_callback_func(void *, size_t, size_t, void *);
+int init_curl(CURL **);
 double get_bitcoin_price(time_t*);
 int fetch_rbf_raw_tx_hex(char *, rbf_data_t *, time_t *);
 int query_rbf_transaction(char *, rbf_data_t**, time_t*);

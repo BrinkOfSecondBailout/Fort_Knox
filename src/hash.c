@@ -168,6 +168,7 @@ void convert_bits(uint8_t *out, size_t *outlen, const uint8_t *in, size_t inlen,
 	if (pad && bits) {
 		out[idx++] = (val << (outbits - bits)) & ((1 << outbits) - 1);
 	}
+
 	*outlen = idx;
 }
 

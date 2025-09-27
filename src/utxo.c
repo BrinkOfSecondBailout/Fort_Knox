@@ -331,7 +331,7 @@ int check_rbf_sequence(char *raw_tx_hex, int num_inputs) {
 		// Reverse bytes (little endian)
 		reverse_bytes(sequence_data, 4);
 		bytes_to_hex(sequence_data, 4, sequence_hex, 9);
-printf("Sequence Hex: %s\n", sequence_hex);
+//printf("Sequence Hex: %s\n", sequence_hex);
 		char *endptr;
 		long int sequence_val = strtol(sequence_hex, &endptr, 16);
 		if (*endptr == '\0' && sequence_val <= 0xFFFFFFFD) {
@@ -494,7 +494,6 @@ int build_rbf_transaction(rbf_data_t *rbf_data, char **raw_tx_hex, uint8_t **seg
 		fprintf(stderr, "Invalid inputs\n");
 		return 1;
 	}
-//printf("Raw Tx Hex: %s\n", rbf_data->raw_tx_hex);
 	long long input_sum = 0;
 	for (int i = 0; i < rbf_data->num_inputs; i++) {
 		input_sum += rbf_data->utxos[i]->amount;
@@ -504,11 +503,13 @@ int build_rbf_transaction(rbf_data_t *rbf_data, char **raw_tx_hex, uint8_t **seg
 		output_sum += rbf_data->outputs[i]->amount;
 	}
 	long long fee_difference = rbf_data->new_fee - rbf_data->old_fee;
-printf("Fee Difference: %d\n", (int)fee_difference);
+// Commented out to test, uncomment later
+/*
 	if (input_sum < output_sum + fee_difference) {
-		fprintf(stderr, "Insufficient funds, %lld < %lld\n", input_sum, output_sum + fee_difference);
+		fprintf(stderr, "Insufficient funds, %lld is not enough to cover %lld\n", input_sum, output_sum + fee_difference);
 		return 1;
 	}
+*/
 	// Estimate buffer size (extra for safety)
 	size_t max_size = 4 + 2 + 9 + rbf_data->num_inputs * 40 + 9 + rbf_data->num_outputs * 25 + rbf_data->num_inputs * 4 + 4 + 1000;
 	uint8_t *buffer = (uint8_t *)g_malloc(max_size);
@@ -572,7 +573,7 @@ printf("Fee Difference: %d\n", (int)fee_difference);
 		// Encode amount to be sent
 		if (i == rbf_data->num_outputs - 1) {
 			encode_uint64_le(output->amount - fee_difference, buffer + pos);	
-printf("Last Output's new amount: %lld\n", output->amount - fee_difference);
+//printf("Last Output's new amount: %lld\n", output->amount - fee_difference);
 		} else {
 			encode_uint64_le(output->amount, buffer + pos);
 		}
@@ -597,7 +598,7 @@ printf("Last Output's new amount: %lld\n", output->amount - fee_difference);
 	}
 	memcpy(*segwit_tx, buffer, 4);
 	memcpy(*segwit_tx + 4, buffer + 6, pos - 6);
-print_bytes_as_hex("Segwit Tx", *segwit_tx, *segwit_len);
+//print_bytes_as_hex("Segwit Tx", *segwit_tx, *segwit_len);
 	// Convert to hex
 	*raw_tx_hex = (char *)g_malloc(pos * 2 + 1);
 	if (!*raw_tx_hex) {
@@ -607,7 +608,7 @@ print_bytes_as_hex("Segwit Tx", *segwit_tx, *segwit_len);
 	}
 	bytes_to_hex(buffer, pos, *raw_tx_hex, pos * 2 + 1);
 	g_free((void *)buffer, max_size);
-printf("Raw Tx Hex: %s\n", *raw_tx_hex);
+//printf("Raw Tx Hex: %s\n", *raw_tx_hex);
 	return 0;	
 }
 
@@ -737,7 +738,7 @@ int build_transaction(const char *recipient, long long amount, utxo_t **selected
 	}
 	memcpy(*segwit_tx, buffer, 4);
 	memcpy(*segwit_tx + 4, buffer + 6, pos - 6);
-print_bytes_as_hex("Segwit Tx", *segwit_tx, *segwit_len);
+//print_bytes_as_hex("Segwit Tx", *segwit_tx, *segwit_len);
 
 	// Convert to hex
 	*raw_tx_hex = g_malloc(pos * 2 + 1);
@@ -748,7 +749,7 @@ print_bytes_as_hex("Segwit Tx", *segwit_tx, *segwit_len);
 		return 1;
 	}
 	bytes_to_hex(buffer, pos, *raw_tx_hex, pos * 2 + 1);
-printf("Raw Tx Hex: %s\n", *raw_tx_hex);
+//printf("Raw Tx Hex: %s\n", *raw_tx_hex);
 	g_free((void *)buffer, max_size);
 	return 0;
 }
@@ -773,7 +774,7 @@ int construct_scriptcode(uint8_t *pubkeyhash, uint8_t *scriptcode, size_t script
 		fprintf(stderr, "Failure constructing scriptcode\n");
 		return 1;
 	}
-print_bytes_as_hex("ScriptCode", scriptcode, 26);
+//print_bytes_as_hex("ScriptCode", scriptcode, 26);
 	return 0;
 }
 
@@ -842,7 +843,7 @@ int construct_preimage(uint8_t *tx_data, size_t tx_len, utxo_t **selected, int n
 	for (int i = 0; i < num_outputs; i++) {
 		// Amount (8 bytes)
 		memcpy(outputs_serialized + outputs_pos, tx_data + pos, 8);
-print_bytes_as_hex("Output Amount", outputs_serialized + outputs_pos, 8);
+//print_bytes_as_hex("Output Amount", outputs_serialized + outputs_pos, 8);
 		outputs_pos += 8;
 		pos += 8;
 		// Script length (1 byte)
@@ -876,25 +877,25 @@ print_bytes_as_hex("Output Amount", outputs_serialized + outputs_pos, 8);
 	size_t preimage_pos = 0;
 	// Version --REUSABLE
 	memcpy(preimage + preimage_pos, version, 4);
-printf("PREHASH IMAGE:\n");
-print_bytes_as_hex("Version", preimage + preimage_pos, 4);
+//printf("PREHASH IMAGE:\n");
+//print_bytes_as_hex("Version", preimage + preimage_pos, 4);
 	preimage_pos += 4;
 	// HashPrevouts --REUSABLE
 	memcpy(preimage + preimage_pos, hash_prevouts, 32);
-print_bytes_as_hex("HashPrevouts", preimage + preimage_pos, 32);
+//print_bytes_as_hex("HashPrevouts", preimage + preimage_pos, 32);
 	preimage_pos += 32;
 	// HashSequence --REUSABLE
 	memcpy(preimage + preimage_pos, hash_sequence, 32);
-print_bytes_as_hex("HashSequence", preimage + preimage_pos, 32);
+//print_bytes_as_hex("HashSequence", preimage + preimage_pos, 32);
 	preimage_pos += 32;
 	for (int i = 0; i < num_inputs; i++) {
-printf("Outpoint (AKA Inputs)\n");
+//printf("Outpoint (AKA Inputs)\n");
 		// Outpoint (txid + vout per input)
 		uint8_t outpoint[36];
 		memcpy(outpoint, tx_data + 7, 32); // TxID
 		memcpy(outpoint + 32, tx_data + 39, 4); // Vout
 		memcpy(preimage + preimage_pos, outpoint, 36);
-print_bytes_as_hex("TXID + VOUT", preimage + preimage_pos, 36);
+//print_bytes_as_hex("TXID + VOUT", preimage + preimage_pos, 36);
 		preimage_pos += 36;
 		// ScriptCode (P2WPKH format: 1976a914<hash>88ac)
 		uint8_t pubkeyhash[20];
@@ -910,35 +911,35 @@ print_bytes_as_hex("TXID + VOUT", preimage + preimage_pos, 36);
 			return 1;
 		}
 		memcpy(preimage + preimage_pos, scriptcode, 26);
-print_bytes_as_hex("Scriptcode", preimage + preimage_pos, 26);
+//print_bytes_as_hex("Scriptcode", preimage + preimage_pos, 26);
 		preimage_pos += 26;
 		// Amount
 		uint8_t amount[8];
 		encode_uint64_le((*selected)[i].amount, amount);
 		memcpy(preimage + preimage_pos, amount, 8);
-print_bytes_as_hex("Input amount", preimage + preimage_pos, 8);
+//print_bytes_as_hex("Input amount", preimage + preimage_pos, 8);
 		preimage_pos += 8;
 		// Sequence
 		memcpy(preimage + preimage_pos, tx_data + 44, 4); 
-print_bytes_as_hex("Sequence", preimage + preimage_pos, 4);
+//print_bytes_as_hex("Sequence", preimage + preimage_pos, 4);
 		preimage_pos += 4;
 	}
 	// HashOutputs --REUSABLE
 	memcpy(preimage + preimage_pos, hash_outputs, 32);
-print_bytes_as_hex("HashOutputs", preimage + preimage_pos, 32);
+//print_bytes_as_hex("HashOutputs", preimage + preimage_pos, 32);
 	preimage_pos += 32;
 	// Locktime --REUSABLE
 	memcpy(preimage + preimage_pos, locktime, 4);
-print_bytes_as_hex("Locktime", preimage + preimage_pos, 4);
+//print_bytes_as_hex("Locktime", preimage + preimage_pos, 4);
 	preimage_pos += 4;
 	// Add sig hash type at the end
 	memcpy(preimage + preimage_pos, sighash_type, 4);
-print_bytes_as_hex("Sighash", preimage + preimage_pos, 4);
+//print_bytes_as_hex("Sighash", preimage + preimage_pos, 4);
 	preimage_pos += 4;
-print_bytes_as_hex("Preimage", preimage, preimage_pos);
+//print_bytes_as_hex("Preimage", preimage, preimage_pos);
 	// Hash256 the entire preimage
 	double_sha256(preimage, preimage_pos, sighash);
-print_bytes_as_hex("Message (Hashed Preimage)", sighash, 32);
+//print_bytes_as_hex("Message (Hashed Preimage)", sighash, 32);
 	g_free((void *)preimage, preimage_len);
 	return 0; 
 }
@@ -958,36 +959,35 @@ int sign_preimage_hash(uint8_t *sighash, uint8_t *privkey, uint8_t *witness, siz
 	}
 	err = gcry_sexp_build(&data_sexp, NULL, "(data (flags raw) (hash-algo sha256) (value %b))", 32, sighash);
 	if (err) {
-		gcry_sexp_release(priv_sexp);
 		fprintf(stderr, "Failed to build data_sexp: %s\n", gcry_strerror(err));
+		gcry_sexp_release(priv_sexp);
 		return 1;
 	}
 	err = gcry_pk_sign(&sig_sexp, data_sexp, priv_sexp);
 	if (err) {
+		fprintf(stderr, "Failed to sign: %s\n", gcry_strerror(err));
 		gcry_sexp_release(data_sexp);
 		gcry_sexp_release(priv_sexp);
-		fprintf(stderr, "Failed to sign: %s\n", gcry_strerror(err));
 		return 1;
 	}
 	gcry_sexp_t r, s;
 	r = gcry_sexp_find_token(sig_sexp, "r", 0);
 	s = gcry_sexp_find_token(sig_sexp, "s", 0);
+	gcry_sexp_release(sig_sexp);
+	gcry_sexp_release(data_sexp);
+	gcry_sexp_release(priv_sexp);
 	if (!r || !s) {
-		gcry_sexp_release(sig_sexp);
-		gcry_sexp_release(data_sexp);
-		gcry_sexp_release(priv_sexp);
 		fprintf(stderr, "Failed to find r or s in signature\n");
+		if (r) gcry_sexp_release(r);
+		if (s) gcry_sexp_release(s);
 		return 1;
 	}
 	size_t r_len, s_len;
 	const void *r_data = gcry_sexp_nth_data(r, 1, &r_len);
 	const void *s_data = gcry_sexp_nth_data(s, 1, &s_len);
+	gcry_sexp_release(r);
+	gcry_sexp_release(s);
 	if (!r_data || !s_data || r_len > 33 || s_len > 32) {
-		gcry_sexp_release(r);
-		gcry_sexp_release(s);
-		gcry_sexp_release(sig_sexp);
-		gcry_sexp_release(data_sexp);
-		gcry_sexp_release(priv_sexp);
 		fprintf(stderr, "Invalid r or s data\n");
 		return 1;
 	}
@@ -1002,10 +1002,12 @@ int sign_preimage_hash(uint8_t *sighash, uint8_t *privkey, uint8_t *witness, siz
 		    0xBA, 0xAE, 0xDC, 0xE6, 0xAF, 0x48, 0xA0, 0x3B,
 		    0xBF, 0xD2, 0x5E, 0x8C, 0xD0, 0x36, 0x41, 0x41
 		};
+		// Init mpis
 		gcry_mpi_t s_mpi, n_mpi, result_mpi;
 		s_mpi = gcry_mpi_set_ui(NULL, 0);
 		n_mpi = gcry_mpi_set_ui(NULL, 0);
 		result_mpi = gcry_mpi_set_ui(NULL, 0);
+		
 		gcry_mpi_scan(&s_mpi, GCRYMPI_FMT_USG, s_data, s_len, NULL);
 		gcry_mpi_scan(&n_mpi, GCRYMPI_FMT_USG, curve_order_n, 32, NULL);
 
@@ -1013,17 +1015,12 @@ int sign_preimage_hash(uint8_t *sighash, uint8_t *privkey, uint8_t *witness, siz
 		gcry_mpi_sub(result_mpi, n_mpi, s_mpi);
 		// Convert result back to bytes
 		gcry_mpi_print(GCRYMPI_FMT_USG, s_final, 32, &s_len, result_mpi);
-		// Release mpi
+		// Release mpis
 		gcry_mpi_release(s_mpi);
 		gcry_mpi_release(n_mpi);
 		gcry_mpi_release(result_mpi);
 
 		if (s_len > 32) {
-		    gcry_sexp_release(r);
-		    gcry_sexp_release(s);
-		    gcry_sexp_release(sig_sexp);
-		    gcry_sexp_release(data_sexp);
-		    gcry_sexp_release(priv_sexp);
 		    fprintf(stderr, "Computed s value too large\n");
 		    return 1;
 		}
@@ -1042,8 +1039,8 @@ int sign_preimage_hash(uint8_t *sighash, uint8_t *privkey, uint8_t *witness, siz
 		}	
 	}
 
-print_bytes_as_hex("R", r_data, r_len);
-print_bytes_as_hex("S", s_final, s_len);
+//print_bytes_as_hex("R", r_data, r_len);
+//print_bytes_as_hex("S", s_final, s_len);
 	
 	// Strip leading zeros for canon DER
 	size_t r_len_stripped = r_len;
@@ -1090,20 +1087,10 @@ print_bytes_as_hex("S", s_final, s_len);
 	sig_len = pos;
 	if (sig_len > 72) {
 		fprintf(stderr, "Signature higher than 72 bytes, too large.\n");
-		gcry_sexp_release(r);
-		gcry_sexp_release(s);
-		gcry_sexp_release(sig_sexp);
-		gcry_sexp_release(data_sexp);
-		gcry_sexp_release(priv_sexp);
 		return 1;
 	}
-	gcry_sexp_release(priv_sexp);
-	gcry_sexp_release(sig_sexp);
-	gcry_sexp_release(data_sexp);
-	gcry_sexp_release(r);
-	gcry_sexp_release(s);
-printf("Sig Len: %zu\n", sig_len);
-print_bytes_as_hex("Signature with sighash", encoded_sig, sig_len);
+//printf("Sig Len: %zu\n", sig_len);
+//print_bytes_as_hex("Signature with sighash", encoded_sig, sig_len);
 	// Construct full witness
 	pos = 0;
 	witness[pos++] = 0x02; // Stack items
@@ -1114,7 +1101,7 @@ print_bytes_as_hex("Signature with sighash", encoded_sig, sig_len);
 	memcpy(witness + pos, pubkey, PUBKEY_LENGTH);
 	pos += PUBKEY_LENGTH;
 	*witness_len = pos;
-print_bytes_as_hex("Witness", witness, *witness_len);
+//print_bytes_as_hex("Witness", witness, *witness_len);
 	return 0;
 }
 
@@ -1177,8 +1164,9 @@ int sign_transaction(char **raw_tx_hex, utxo_t **selected, int num_selected) {
     	bytes_to_hex(new_tx_data, current_pos, new_raw_tx_hex, current_pos * 2 + 1);
 	new_raw_tx_hex[current_pos * 2] = '\0';
 	g_free((void *)new_tx_data, new_tx_len);
+	g_free((void *)*raw_tx_hex, strlen(*raw_tx_hex));
     	*raw_tx_hex = new_raw_tx_hex;
-printf("Signed hex: %s\n", *raw_tx_hex);
+//printf("Signed hex: %s\n", *raw_tx_hex);
     	return 0;
 }
 
@@ -1212,7 +1200,7 @@ int broadcast_transaction(char *raw_tx_hex, time_t *last_request) {
 		free(buffer.data);
 		return 1;
 	}
-printf("Response: %s\n", buffer.data);
+//printf("Response: %s\n", buffer.data);
 	// Check response for success
 	if (strstr(buffer.data, "Transaction Submitted") == NULL) {
 		fprintf(stderr, "Unsuccessful broadcast.\n");
