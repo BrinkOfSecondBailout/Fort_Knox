@@ -32,6 +32,7 @@ typedef struct {
 
 int serialize_extended_key(key_pair_t *, key_pair_t *, int, char **);
 int key_to_pubkeyhash(key_pair_t *key, uint8_t *pubkeyhash);
+int scriptpubkey_to_pubkeyhash(uint8_t *, size_t, uint8_t *, size_t);
 int pubkeyhash_to_address(const uint8_t *, size_t, char *, size_t);
 int pubkey_to_address(const uint8_t *, size_t, char *, size_t);
 int generate_master_key(const uint8_t *seed, size_t, key_pair_t *);

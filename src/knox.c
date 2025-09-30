@@ -749,7 +749,7 @@ int32 send_handle(User *user) {
 	printf("Please wait while we query the blockchain to check your UTXOs balance...\n(Account: %d, first 20 address indexes)\n", (int)account_index);
 	utxo_t **utxos = NULL;
 	int num_utxos = 0;
-	long long total_balance = get_utxos_balance(user->master_key, &utxos, &num_utxos, account_index, &user->last_api_request);
+	long long total_balance = get_utxos_key_and_balance(user->master_key, &utxos, &num_utxos, account_index, &user->last_api_request);
 	if (total_balance < 0) {
 		fprintf(stderr, "Failed to fetch UTXOs.\n");
 		return 1;

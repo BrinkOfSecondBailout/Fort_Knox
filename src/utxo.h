@@ -37,7 +37,7 @@ typedef struct {
 
 int estimated_transaction_size(int, int);
 int get_fee_rate(long long *, long long *, time_t *);
-long long get_utxos_balance(key_pair_t *, utxo_t***, int *, uint32_t, time_t *);
+long long get_utxos_key_and_balance(key_pair_t *, utxo_t***, int *, uint32_t, time_t *);
 int select_coins(utxo_t **, int, long long, long long, utxo_t ***, int *, long long *);
 int address_to_scriptpubkey(const char *, uint8_t *, size_t *);
 int check_rbf_sequence(char *, int);

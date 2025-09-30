@@ -93,6 +93,15 @@ int key_to_pubkeyhash(key_pair_t *key, uint8_t *pubkeyhash) {
     	return 0;
 }
 
+int scriptpubkey_to_pubkeyhash(uint8_t *spk, size_t spk_len, uint8_t *pubkeyhash, size_t pkh_len) {
+	if (spk_len != 22 || pkh_len != 20) {
+		fprintf(stderr, "Invalid inputs\n");
+		return 1;
+	}
+	memcpy(pubkeyhash, spk + 2, 20);
+	return 0;
+}
+
 int pubkeyhash_to_address(const uint8_t *pub_key_hash, size_t pub_key_hash_len, char *address, size_t address_len) {
 	uint8_t program_values[BECH32_VALUES_MAX];
 	size_t program_values_len;
