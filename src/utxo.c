@@ -956,15 +956,16 @@ int sign_preimage_hash(uint8_t *sighash, uint8_t *privkey, uint8_t *witness, siz
 	}
 print_bytes_as_hex("Private Key", privkey, 32);
 print_bytes_as_hex("Public Key", pubkey, PUBKEY_LENGTH);
+print_bytes_as_hex("Sighash", sighash, 32);
 	// Sign with private key
 	gcry_sexp_t priv_sexp, data_sexp, sig_sexp;
 	gcry_error_t err;
-	err = gcry_sexp_build(&priv_sexp, NULL, "(private-key (ecc (curve secp256k1) (d %b)))", PRIVKEY_LENGTH, (char *)privkey);
+	err = gcry_sexp_build(&priv_sexp, NULL, "(private-key (ecc(curve secp256k1) (d %b)))", PRIVKEY_LENGTH, privkey);
 	if (err) {
 		fprintf(stderr, "Failed to build priv_sexp: %s\n", gcry_strerror(err));
 		return 1;
 	}
-	err = gcry_sexp_build(&data_sexp, NULL, "(data (flags raw) (hash-algo sha256) (value %b))", 32, (char *)sighash);
+	err = gcry_sexp_build(&data_sexp, NULL, "(data (flags raw) (hash-algo sha256) (value %b))", 32, sighash);
 	if (err) {
 		fprintf(stderr, "Failed to build data_sexp: %s\n", gcry_strerror(err));
 		gcry_sexp_release(priv_sexp);
@@ -982,27 +983,29 @@ print_bytes_as_hex("Public Key", pubkey, PUBKEY_LENGTH);
 	s = gcry_sexp_find_token(sig_sexp, "s", 0);
 gcry_sexp_dump(r);
 gcry_sexp_dump(s);
-	gcry_sexp_release(sig_sexp);
-	gcry_sexp_release(data_sexp);
-	gcry_sexp_release(priv_sexp);
 	if (!r || !s) {
 		fprintf(stderr, "Failed to find r or s in signature\n");
 		if (r) gcry_sexp_release(r);
 		if (s) gcry_sexp_release(s);
+		gcry_sexp_release(sig_sexp);
+		gcry_sexp_release(data_sexp);
+		gcry_sexp_release(priv_sexp);
 		return 1;
 	}
 	size_t r_len, s_len;
 	const void *r_data = gcry_sexp_nth_data(r, 1, &r_len);
 	const void *s_data = gcry_sexp_nth_data(s, 1, &s_len);
-	gcry_sexp_release(r);
-	gcry_sexp_release(s);
 	if (!r_data || !s_data || r_len > 33 || s_len > 32) {
 		fprintf(stderr, "Invalid r or s data\n");
+		gcry_sexp_release(r);
+		gcry_sexp_release(s);
+		gcry_sexp_release(sig_sexp);
+		gcry_sexp_release(data_sexp);
+		gcry_sexp_release(priv_sexp);
 		return 1;
 	}
 print_bytes_as_hex("Original R", r_data, r_len);
 print_bytes_as_hex("Original S", s_data, s_len);
-
 	// Check for low-S
 	uint8_t s_final[32];
 	int low_s = is_s_low(s_data, s_len);
@@ -1097,6 +1100,11 @@ print_bytes_as_hex("S", encoded_sig + pos, s_len_stripped);
 	sig_len = pos;
 	if (sig_len > 72) {
 		fprintf(stderr, "Signature higher than 72 bytes, too large.\n");
+		gcry_sexp_release(r);
+		gcry_sexp_release(s);
+		gcry_sexp_release(sig_sexp);
+		gcry_sexp_release(data_sexp);
+		gcry_sexp_release(priv_sexp);
 		return 1;
 	}
 printf("Sig Len: %zu\n", sig_len);
@@ -1112,6 +1120,11 @@ print_bytes_as_hex("Signature with sighash", encoded_sig, sig_len);
 	pos += PUBKEY_LENGTH;
 	*witness_len = pos;
 print_bytes_as_hex("Witness", witness, *witness_len);
+	gcry_sexp_release(r);
+	gcry_sexp_release(s);
+	gcry_sexp_release(sig_sexp);
+	gcry_sexp_release(data_sexp);
+	gcry_sexp_release(priv_sexp);
 	return 0;
 }
 
