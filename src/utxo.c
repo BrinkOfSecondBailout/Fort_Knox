@@ -774,7 +774,7 @@ int build_transaction(const char *recipient, long long amount, utxo_t **selected
 		return 1;
 	}
 	bytes_to_hex(buffer, pos, *raw_tx_hex, pos * 2 + 1);
-printf("Raw Tx Hex Before Signature: %s\n", *raw_tx_hex);
+//printf("Raw Tx Hex Before Signature: %s\n", *raw_tx_hex);
 	g_free((void *)buffer, max_size);
 	return 0;
 }
@@ -844,25 +844,25 @@ int construct_preimage(uint8_t *tx_data, size_t tx_len, utxo_t **selected, int n
 	for (int i = 0; i < num_outputs; i++) {
 		// Amount (8 bytes)
 		memcpy(outputs_serialized + outputs_pos, tx_data + pos, 8);
-print_bytes_as_hex("Output Amount", outputs_serialized + outputs_pos, 8);
+//print_bytes_as_hex("Output Amount", outputs_serialized + outputs_pos, 8);
 		outputs_pos += 8;
 		pos += 8;
 
 		// Script length (1 byte)
 		uint8_t script_len = tx_data[pos];
 		memcpy(outputs_serialized + outputs_pos, &script_len, 1);
-print_bytes_as_hex("Output Script Len", outputs_serialized + outputs_pos, 1);
+//print_bytes_as_hex("Output Script Len", outputs_serialized + outputs_pos, 1);
 		outputs_pos += 1;
 		pos += 1;
 		// Script (~22 bytes)
 		memcpy(outputs_serialized + outputs_pos, tx_data + pos, script_len);
-print_bytes_as_hex("Output Script Pub", outputs_serialized + outputs_pos, script_len);
+//print_bytes_as_hex("Output Script Pub", outputs_serialized + outputs_pos, script_len);
 		outputs_pos += script_len;
 		pos += script_len;
 	}
 	uint8_t hash_outputs[32];
 	double_sha256(outputs_serialized, outputs_pos, hash_outputs);
-print_bytes_as_hex("Hash outputs", hash_outputs, 32);
+//print_bytes_as_hex("Hash outputs", hash_outputs, 32);
 	g_free((void *)outputs_serialized, num_outputs * (8 + 1 + 22));
 	// Locktime (4 bytes)
 	uint8_t locktime[4];
@@ -882,25 +882,25 @@ print_bytes_as_hex("Hash outputs", hash_outputs, 32);
 	size_t preimage_pos = 0;
 	// Version --REUSABLE
 	memcpy(preimage + preimage_pos, version, 4);
-printf("PREHASH IMAGE:\n");
-print_bytes_as_hex("Version", preimage + preimage_pos, 4);
+//printf("PREHASH IMAGE:\n");
+//print_bytes_as_hex("Version", preimage + preimage_pos, 4);
 	preimage_pos += 4;
 	// HashPrevouts --REUSABLE
 	memcpy(preimage + preimage_pos, hash_prevouts, 32);
-print_bytes_as_hex("HashPrevouts (inputs)", preimage + preimage_pos, 32);
+//print_bytes_as_hex("HashPrevouts (inputs)", preimage + preimage_pos, 32);
 	preimage_pos += 32;
 	// HashSequence --REUSABLE
 	memcpy(preimage + preimage_pos, hash_sequence, 32);
-print_bytes_as_hex("HashSequence", preimage + preimage_pos, 32);
+//print_bytes_as_hex("HashSequence", preimage + preimage_pos, 32);
 	preimage_pos += 32;
 	for (int i = 0; i < num_inputs; i++) {
-printf("Inputs (aka outpoints)\n");
+//printf("Inputs (aka outpoints)\n");
 		// Outpoint (txid + vout per input)
 		uint8_t outpoint[36];
 		memcpy(outpoint, tx_data + 7, 32); // TxID
 		memcpy(outpoint + 32, tx_data + 39, 4); // Vout
 		memcpy(preimage + preimage_pos, outpoint, 36);
-print_bytes_as_hex("TXID + VOUT", preimage + preimage_pos, 36);
+//print_bytes_as_hex("TXID + VOUT", preimage + preimage_pos, 36);
 		preimage_pos += 36;
 		// ScriptCode (P2WPKH format: 1976a914<hash>88ac)
 		uint8_t pubkeyhash[20];
@@ -916,35 +916,35 @@ print_bytes_as_hex("TXID + VOUT", preimage + preimage_pos, 36);
 			return 1;
 		}
 		memcpy(preimage + preimage_pos, scriptcode, 26);
-print_bytes_as_hex("Scriptcode", preimage + preimage_pos, 26);
+//print_bytes_as_hex("Scriptcode", preimage + preimage_pos, 26);
 		preimage_pos += 26;
 		// Amount
 		uint8_t amount[8];
 		encode_uint64_le((*selected)[i].amount, amount);
 		memcpy(preimage + preimage_pos, amount, 8);
-print_bytes_as_hex("Input amount", preimage + preimage_pos, 8);
+//print_bytes_as_hex("Input amount", preimage + preimage_pos, 8);
 		preimage_pos += 8;
 		// Sequence
 		memcpy(preimage + preimage_pos, tx_data + 44, 4); 
-print_bytes_as_hex("Sequence", preimage + preimage_pos, 4);
+//print_bytes_as_hex("Sequence", preimage + preimage_pos, 4);
 		preimage_pos += 4;
 	}
 	// HashOutputs --REUSABLE
 	memcpy(preimage + preimage_pos, hash_outputs, 32);
-print_bytes_as_hex("HashOutputs", preimage + preimage_pos, 32);
+//print_bytes_as_hex("HashOutputs", preimage + preimage_pos, 32);
 	preimage_pos += 32;
 	// Locktime --REUSABLE
 	memcpy(preimage + preimage_pos, locktime, 4);
-print_bytes_as_hex("Locktime", preimage + preimage_pos, 4);
+//print_bytes_as_hex("Locktime", preimage + preimage_pos, 4);
 	preimage_pos += 4;
 	// Add sig hash type at the end
 	memcpy(preimage + preimage_pos, sighash_type, 4);
-print_bytes_as_hex("Sighash", preimage + preimage_pos, 4);
+//print_bytes_as_hex("Sighash", preimage + preimage_pos, 4);
 	preimage_pos += 4;
-print_bytes_as_hex("Preimage", preimage, preimage_pos);
+//print_bytes_as_hex("Preimage", preimage, preimage_pos);
 	// Hash256 the entire preimage
 	double_sha256(preimage, preimage_pos, sighash);
-print_bytes_as_hex("Message (Hashed Preimage)", sighash, 32);
+//print_bytes_as_hex("Message (Hashed Preimage)", sighash, 32);
 	g_free((void *)preimage, preimage_len);
 	return 0; 
 }
@@ -954,9 +954,9 @@ int sign_preimage_hash(uint8_t *sighash, uint8_t *privkey, uint8_t *witness, siz
 		fprintf(stderr, "Input errors\n");
 		return 1;
 	}
-print_bytes_as_hex("Private Key", privkey, 32);
-print_bytes_as_hex("Public Key", pubkey, PUBKEY_LENGTH);
-print_bytes_as_hex("Sighash", sighash, 32);
+//print_bytes_as_hex("Private Key", privkey, 32);
+//print_bytes_as_hex("Public Key", pubkey, PUBKEY_LENGTH);
+//print_bytes_as_hex("Sighash", sighash, 32);
 	// Sign with private key
 	gcry_sexp_t priv_sexp, data_sexp, sig_sexp;
 	gcry_error_t err;
@@ -981,8 +981,8 @@ print_bytes_as_hex("Sighash", sighash, 32);
 	gcry_sexp_t r, s;
 	r = gcry_sexp_find_token(sig_sexp, "r", 0);
 	s = gcry_sexp_find_token(sig_sexp, "s", 0);
-gcry_sexp_dump(r);
-gcry_sexp_dump(s);
+//gcry_sexp_dump(r);
+//gcry_sexp_dump(s);
 	if (!r || !s) {
 		fprintf(stderr, "Failed to find r or s in signature\n");
 		if (r) gcry_sexp_release(r);
@@ -1004,8 +1004,8 @@ gcry_sexp_dump(s);
 		gcry_sexp_release(priv_sexp);
 		return 1;
 	}
-print_bytes_as_hex("Original R", r_data, r_len);
-print_bytes_as_hex("Original S", s_data, s_len);
+//print_bytes_as_hex("Original R", r_data, r_len);
+//print_bytes_as_hex("Original S", s_data, s_len);
 	// Check for low-S
 	uint8_t s_final[32];
 	int low_s = is_s_low(s_data, s_len);
@@ -1085,14 +1085,14 @@ print_bytes_as_hex("Original S", s_data, s_len);
 	encoded_sig[pos++] = r_needs_zero ? r_len_stripped + 1 : r_len_stripped;
 	if (r_needs_zero) encoded_sig[pos++] = 0x00;
 	memcpy(encoded_sig + pos, r_data_stripped, r_len_stripped);
-print_bytes_as_hex("R", encoded_sig + pos, r_len_stripped);
+//print_bytes_as_hex("R", encoded_sig + pos, r_len_stripped);
 	pos += r_len_stripped;
 	// S
 	encoded_sig[pos++] = 0x02;
 	encoded_sig[pos++] = s_needs_zero ? s_len_stripped + 1 : s_len_stripped;
 	if (s_needs_zero) encoded_sig[pos++] = 0x00;
 	memcpy(encoded_sig + pos, s_data_stripped, s_len_stripped);
-print_bytes_as_hex("S", encoded_sig + pos, s_len_stripped);
+//print_bytes_as_hex("S", encoded_sig + pos, s_len_stripped);
 	pos += s_len_stripped;
 	// Append signature hash type
 	encoded_sig[pos++] = 0x01;
@@ -1107,8 +1107,8 @@ print_bytes_as_hex("S", encoded_sig + pos, s_len_stripped);
 		gcry_sexp_release(priv_sexp);
 		return 1;
 	}
-printf("Sig Len: %zu\n", sig_len);
-print_bytes_as_hex("Signature with sighash", encoded_sig, sig_len);
+//printf("Sig Len: %zu\n", sig_len);
+//print_bytes_as_hex("Signature with sighash", encoded_sig, sig_len);
 	// Construct full witness
 	pos = 0;
 	witness[pos++] = 0x02; // Stack items
@@ -1119,7 +1119,7 @@ print_bytes_as_hex("Signature with sighash", encoded_sig, sig_len);
 	memcpy(witness + pos, pubkey, PUBKEY_LENGTH);
 	pos += PUBKEY_LENGTH;
 	*witness_len = pos;
-print_bytes_as_hex("Witness", witness, *witness_len);
+//print_bytes_as_hex("Witness", witness, *witness_len);
 	gcry_sexp_release(r);
 	gcry_sexp_release(s);
 	gcry_sexp_release(sig_sexp);
@@ -1197,7 +1197,7 @@ int broadcast_transaction(char *raw_tx_hex, time_t *last_request) {
 	CURL *curl = curl_easy_init();
 	if (!curl) return 1;
 	printf("Broadcasting your transaction...\n");
-	char url[] = "https://000blockchain.info/pushtx";
+	char url[] = "https://blockchain.info/pushtx";
 	char post_data[2048];
 	snprintf(post_data, sizeof(post_data), "tx=%s", raw_tx_hex);
 	
